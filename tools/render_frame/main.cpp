@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "../../firmware/src/board.h"
 #include "../../firmware/src/canvas_mem.h"
 // config.cpp, не config.h: defaults() (заводские дашборды) — внутренний
 // помощник в анонимном namespace config.cpp, с внешней линковкой недоступен
@@ -149,7 +150,7 @@ slots::Store build_empty_scenario() { return slots::Store(); }
 
 bool render(const slots::Store& store, const layout::DeviceInfo& device, const std::string& path,
             const config::Dashboard& dashboard) {
-    canvas::CanvasMemory canvas(800, 480);
+    canvas::CanvasMemory canvas(board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
     layout::draw_frame(canvas, store, device, dashboard);
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
@@ -162,7 +163,7 @@ bool render(const slots::Store& store, const layout::DeviceInfo& device, const s
 // со снятого PNG (см. Status Log в .claude/plans/tablo.md): если тут и в
 // проверке разойдётся строка — расхождение сразу увидит тот, кто это читает.
 bool render_boot(const std::string& path) {
-    canvas::CanvasMemory canvas(800, 480);
+    canvas::CanvasMemory canvas(board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
     layout::draw_boot(canvas, i18n::tr(i18n::Str::kBootStatus));
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());
@@ -183,7 +184,7 @@ slots::Store build_failures_scenario() {
 }
 
 bool render_ap_credentials(const std::string& path) {
-    canvas::CanvasMemory canvas(800, 480);
+    canvas::CanvasMemory canvas(board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
     layout::draw_ap_credentials(canvas, "tablo-setup", "23456789AB");
     bool ok = canvas.save_png(path);
     std::printf("%s -> %s\n", ok ? "OK" : "FAIL", path.c_str());

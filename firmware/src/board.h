@@ -19,7 +19,7 @@ constexpr int8_t SPI_CLK = 7;
 constexpr int8_t SPI_MOSI = 9;
 
 constexpr uint16_t SCREEN_WIDTH = 800;
-constexpr uint16_t SCREEN_HEIGHT = 480;
+constexpr uint16_t SCREEN_HEIGHT = 600;
 
 // ── кнопки ──
 // Три пользовательские кнопки платы. Подтянуты к питанию, нажатие даёт LOW.

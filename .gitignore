@@ -11,5 +11,13 @@ tools/render_frame/render_frame
 tools/render_frame/out/
 firmware/src/secrets.h
 
+# PocketBook build artifacts
+pocketbook/tablo_render_host
+pocketbook/tablo_render_arm
+pocketbook/tablo_daemon_host
+pocketbook/tablo_daemon_arm
+pocketbook/*.png
+dist_pb/
+
 # Рабочие планы и заметки оркестратора — не часть продукта
 .claude/
