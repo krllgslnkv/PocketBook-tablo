@@ -570,38 +570,36 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     canvas.fill(Color::White);
     draw_header(canvas, device);
 
-    const int16_t body_top = BODY_TOP;
-    const int16_t body_h = static_cast<int16_t>(canvas.height() - body_top - MARGIN);
     const int16_t body_w = static_cast<int16_t>(canvas.width() - 2 * MARGIN);
     const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
 
     if (setup_url.length() > 0) {
-        constexpr uint8_t kModulePx = 5;
+        constexpr uint8_t kModulePx = 6;
         constexpr uint8_t kQuietModules = 4;
-        const int16_t qr_side = wifi_qr::side_for(kModulePx, kQuietModules);  // 245px
-        const int16_t qr_x = static_cast<int16_t>(canvas.width() - MARGIN - qr_side - 15);
-        const int16_t qr_y = static_cast<int16_t>(body_top + (body_h - qr_side - 26) / 2);
+        const int16_t qr_side = wifi_qr::side_for(kModulePx, kQuietModules);  // 294px
+        const int16_t qr_x = static_cast<int16_t>(canvas.width() - MARGIN - qr_side - 10);
+        const int16_t qr_y = 90;
 
         wifi_qr::draw(canvas, qr_x, qr_y, setup_url, kModulePx, kQuietModules);
 
         const char* qr_label = is_ru ? "СКАНИРУЙТЕ ДЛЯ НАСТРОЙКИ" : "SCAN WITH PHONE CAMERA";
         const int16_t qr_lw = text_width(fonts::Terminus14, qr_label);
         const int16_t qr_lx = static_cast<int16_t>(qr_x + (qr_side - qr_lw) / 2);
-        draw_text(canvas, fonts::Terminus14, qr_lx, static_cast<int16_t>(qr_y + qr_side + 22),
+        draw_text(canvas, fonts::Terminus14, qr_lx, static_cast<int16_t>(qr_y + qr_side + 24),
                   qr_label, Color::Black, 1, /*bold=*/true);
 
         const int16_t text_w = static_cast<int16_t>(qr_x - MARGIN - 30);
-        int16_t y = static_cast<int16_t>(body_top + (body_h - 260) / 2);
+        int16_t y = 80;
 
         widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, text_w, 0},
                                      is_ru ? "НАСТРОЙКА TABLO" : "TABLO SETUP");
-        y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 36);
+        y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 40);
 
         const char* title = is_ru ? "Откройте в браузере:" : "Open in browser:";
         draw_text(canvas, fonts::Terminus24, MARGIN, y, title, Color::Black, 1, /*bold=*/true);
         y = static_cast<int16_t>(y + 36);
 
-        const int16_t box_h = 46;
+        const int16_t box_h = 50;
         canvas.rect(MARGIN, y, text_w, box_h, Color::Black);
         canvas.rect(static_cast<int16_t>(MARGIN + 1), static_cast<int16_t>(y + 1),
                     static_cast<int16_t>(text_w - 2), static_cast<int16_t>(box_h - 2), Color::Black);
@@ -609,51 +607,57 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
         const int16_t url_w = text_width(fonts::Terminus24, setup_url.c_str());
         const int16_t url_x = (url_w < text_w - 20)
                                   ? static_cast<int16_t>(MARGIN + (text_w - url_w) / 2)
-                                  : static_cast<int16_t>(MARGIN + 12);
-        draw_text(canvas, fonts::Terminus24, url_x, static_cast<int16_t>(y + 32), setup_url.c_str(),
+                                  : static_cast<int16_t>(MARGIN + 14);
+        draw_text(canvas, fonts::Terminus24, url_x, static_cast<int16_t>(y + 34), setup_url.c_str(),
                   Color::Black, 1, /*bold=*/true);
-        y = static_cast<int16_t>(y + box_h + 32);
+        y = static_cast<int16_t>(y + box_h + 38);
 
         if (is_ru) {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Наведите камеру телефона на QR-код справа,", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 22);
+                      "Наведите камеру смартфона на QR-код справа,", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "чтобы настроить экраны, виджеты и ключи источников.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 22);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Читалку не нужно подключать по USB к компьютеру.", Color::Black, 1, false);
+                      "Читалку не нужно подключать по USB к компьютеру —", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
+            draw_text(canvas, fonts::Terminus14, MARGIN, y,
+                      "все настройки передаются автономно по Wi-Fi.", Color::Black, 1, false);
         } else {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Point your phone camera at the QR code on the right", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 22);
+                      "Point your smartphone camera at the QR code on the right", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "to configure screens, widgets and API credentials.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 22);
+                      "to configure screens, widgets and data sources.", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "No USB cable connection to PC required.", Color::Black, 1, false);
+                      "No USB connection to PC required —", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
+            draw_text(canvas, fonts::Terminus14, MARGIN, y,
+                      "all changes sync autonomously over Wi-Fi.", Color::Black, 1, false);
         }
     } else {
-        int16_t y = static_cast<int16_t>(body_top + (body_h - 180) / 2);
+        int16_t y = 90;
         widgets::prims::draw_eyebrow(canvas, Rect{MARGIN, y, body_w, 0},
                                      is_ru ? "НАСТРОЙКА TABLO" : "TABLO SETUP");
-        y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 36);
+        y = static_cast<int16_t>(y + widgets::prims::kEyebrowTextOffset + 40);
 
         const char* title = is_ru ? "Wi-Fi не подключен" : "Wi-Fi is not connected";
         draw_text(canvas, fonts::Terminus24, MARGIN, y, title, Color::Black, 1, /*bold=*/true);
-        y = static_cast<int16_t>(y + 40);
+        y = static_cast<int16_t>(y + 42);
 
         if (is_ru) {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Подключите PocketBook к сети Wi-Fi в настройках читалки.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 24);
+            y = static_cast<int16_t>(y + 26);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "После подключения адрес настройки и QR-код появятся автоматически.",
                       Color::Black, 1, false);
         } else {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Connect PocketBook to Wi-Fi in device settings.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 24);
+            y = static_cast<int16_t>(y + 26);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Once connected, setup URL and QR code will appear automatically.", Color::Black, 1, false);
         }
