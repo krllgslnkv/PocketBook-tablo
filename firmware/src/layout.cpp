@@ -609,10 +609,10 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     // 3. Внизу экрана пояснение
     const char* hint = is_ru ? "Откройте адрес в браузере или отсканируйте QR-код"
                              : "Open the address in your browser or scan the QR code";
-    const int16_t hint_w = text_width(fonts::Terminus16, hint);
+    const int16_t hint_w = text_width(fonts::Terminus14, hint);
     const int16_t hint_x = static_cast<int16_t>((canvas.width() - hint_w) / 2);
     const int16_t hint_y = static_cast<int16_t>(canvas.height() - 40);
-    draw_text(canvas, fonts::Terminus16, hint_x, hint_y, hint, Color::Black, 1, false);
+    draw_text(canvas, fonts::Terminus14, hint_x, hint_y, hint, Color::Black, 1, false);
 }
 
 }  // namespace layout
