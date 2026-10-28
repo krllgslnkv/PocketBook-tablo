@@ -96,6 +96,7 @@ pio run -t uploadfs        # залить страницу настройки
 
 | Источник | Что ввести | Где взять |
 |---|---|---|
+| Antigravity | OAuth токен / refresh токен | macOS: `security find-generic-password -s gemini -a antigravity -w`<br>Windows: *Диспетчер учетных данных → Учетные данные Windows → gemini:antigravity* |
 | Claude | OAuth access + refresh token | Вход в Claude Code: `~/.claude/.credentials.json` (macOS: связка ключей, элемент «Claude Code-credentials») |
 | Codex | OAuth access + refresh token | Вход в Codex CLI: `~/.codex/auth.json` |
 | Почта | IMAP-сервер, адрес, пароль приложения | Пароли приложений у провайдера (Gmail: Безопасность → Пароли приложений) |
