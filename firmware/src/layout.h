@@ -67,6 +67,7 @@ struct DeviceInfo {
     uint32_t now = 0;             // время кадра
     uint32_t next_update_at = 0;  // 0 — неизвестно
     int16_t timezone_minutes = 0;
+    String setup_url;             // URL веб-интерфейса настройки (e.g. "http://192.168.1.45:8080")
 };
 
 // ── чистые функции: тестируются на хосте без канвы и без сети ──
@@ -171,5 +172,8 @@ void draw_frame(canvas::Canvas& canvas, const slots::Store& store, const DeviceI
 void draw_boot(canvas::Canvas& canvas, const char* status);
 
 void draw_ap_credentials(canvas::Canvas& canvas, const String& ssid, const String& password);
+
+// Экран первичной настройки / пустого дашборда: отображает веб-адрес настроек и QR-код.
+void draw_setup(canvas::Canvas& canvas, const DeviceInfo& device, const String& setup_url);
 
 }  // namespace layout

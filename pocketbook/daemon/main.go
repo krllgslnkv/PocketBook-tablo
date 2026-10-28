@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"net"
 	"net/http"
 	"net/textproto"
 	"os"
@@ -116,6 +117,7 @@ type DeviceInfo struct {
 	NextUpdateAt    uint32 `json:"next_update_at"`
 	TimezoneMinutes int    `json:"timezone_minutes"`
 	Lang            string `json:"lang"`
+	SetupURL        string `json:"setup_url,omitempty"`
 }
 
 type StorePayload struct {
@@ -198,6 +200,87 @@ func readRSSI() int {
 		}
 	}
 	return -60
+}
+
+func getLocalIP() string {
+	// 1. Dial UDP to resolve active outbound route without sending packets
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err == nil {
+		defer conn.Close()
+		localAddr := conn.LocalAddr().(*net.UDPAddr)
+		if !localAddr.IP.IsLoopback() && localAddr.IP.To4() != nil {
+			return localAddr.IP.String()
+		}
+	}
+
+	// 2. Iterate network interfaces, prioritizing wireless/ethernet
+	ifaces, err := net.Interfaces()
+	if err == nil {
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			name := strings.ToLower(iface.Name)
+			if strings.HasPrefix(name, "wlan") || strings.HasPrefix(name, "ra") || strings.HasPrefix(name, "eth") {
+				addrs, _ := iface.Addrs()
+				for _, addr := range addrs {
+					var ip net.IP
+					switch v := addr.(type) {
+					case *net.IPNet:
+						ip = v.IP
+					case *net.IPAddr:
+						ip = v.IP
+					}
+					if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+						return ip.String()
+					}
+				}
+			}
+		}
+
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addrs, _ := iface.Addrs()
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				if ip != nil && !ip.IsLoopback() && ip.To4() != nil {
+					return ip.String()
+				}
+			}
+		}
+	}
+
+	// 3. Fallback for PocketBook: execute ip or ifconfig
+	if out, err := exec.Command("ip", "-4", "addr", "show", "wlan0").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && fields[0] == "inet" {
+				return strings.Split(fields[1], "/")[0]
+			}
+		}
+	}
+	if out, err := exec.Command("ifconfig", "wlan0").Output(); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, "inet ") || strings.Contains(line, "inet addr:") {
+				fields := strings.Fields(line)
+				for _, f := range fields {
+					ipStr := strings.TrimPrefix(f, "addr:")
+					if parsed := net.ParseIP(ipStr); parsed != nil && parsed.To4() != nil && !parsed.IsLoopback() {
+						return ipStr
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // -----------------------------------------------------------------------------
@@ -843,6 +926,12 @@ func (d *Daemon) pollAllDue() {
 // -----------------------------------------------------------------------------
 
 func (d *Daemon) renderFrame() error {
+	ip := getLocalIP()
+	setupURL := ""
+	if ip != "" {
+		setupURL = fmt.Sprintf("http://%s:%d", ip, d.port)
+	}
+
 	d.mu.Lock()
 	payload := StorePayload{
 		Device: DeviceInfo{
@@ -852,6 +941,7 @@ func (d *Daemon) renderFrame() error {
 			NextUpdateAt:    uint32(time.Now().Unix() + 300),
 			TimezoneMinutes: d.settings.TimezoneMinutes,
 			Lang:            d.settings.Lang,
+			SetupURL:        setupURL,
 		},
 		Slots:  d.slots,
 		Failed: d.failed,
@@ -867,12 +957,17 @@ func (d *Daemon) renderFrame() error {
 		return err
 	}
 
-	cmd := exec.Command(d.rendererPath,
+	args := []string{
 		"-config", d.cfgPath,
 		"-slots", tmpSlotsFile,
 		"-out", d.imgPath,
 		"-rot", d.rotMode,
-	)
+	}
+	if setupURL != "" {
+		args = append(args, "-setup-url", setupURL)
+	}
+
+	cmd := exec.Command(d.rendererPath, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -885,7 +980,7 @@ func (d *Daemon) renderFrame() error {
 		exec.Command("/ebrmain/bin/openbook", d.imgPath).Start()
 	}
 
-	log.Printf("Frame rendered successfully -> %s", d.imgPath)
+	log.Printf("Frame rendered successfully -> %s (setup URL: %s)", d.imgPath, setupURL)
 	return nil
 }
 
@@ -1037,9 +1132,17 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	ip := getLocalIP()
+	setupURL := ""
+	if ip != "" {
+		setupURL = fmt.Sprintf("http://%s:%d", ip, d.port)
+	}
+
 	resp := map[string]interface{}{
 		"time_synced": true,
 		"slots":       slotsStatus,
+		"ip":          ip,
+		"setup_url":   setupURL,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

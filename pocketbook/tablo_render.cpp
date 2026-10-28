@@ -65,6 +65,8 @@ int main(int argc, char** argv) {
     std::string boot_status = "";
     std::string ap_ssid = "";
     std::string ap_password = "";
+    std::string setup_url = "";
+    bool force_setup = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -78,6 +80,10 @@ int main(int argc, char** argv) {
             rot_mode = argv[++i];
         } else if (arg == "-boot" && i + 1 < argc) {
             boot_status = argv[++i];
+        } else if (arg == "-setup-url" && i + 1 < argc) {
+            setup_url = argv[++i];
+        } else if (arg == "-setup") {
+            force_setup = true;
         } else if (arg == "-ap" && i + 2 < argc) {
             ap_ssid = argv[++i];
             ap_password = argv[++i];
@@ -153,6 +159,9 @@ int main(int argc, char** argv) {
                         if (dev["now"].is<uint32_t>()) device.now = dev["now"];
                         if (dev["next_update_at"].is<uint32_t>()) device.next_update_at = dev["next_update_at"];
                         if (dev["timezone_minutes"].is<int>()) device.timezone_minutes = dev["timezone_minutes"];
+                        if (dev["setup_url"].is<const char*>()) {
+                            device.setup_url = dev["setup_url"].as<const char*>();
+                        }
                         if (dev["lang"].is<const char*>()) {
                             i18n::set_lang(i18n::from_code(dev["lang"]));
                         }
@@ -204,9 +213,17 @@ int main(int argc, char** argv) {
             }
         }
 
-        uint8_t db_idx = settings.active_dashboard;
-        if (db_idx >= settings.dashboards.size()) db_idx = 0;
-        layout::draw_frame(src_canvas, store, device, settings.dashboards[db_idx]);
+        if (!setup_url.empty()) {
+            device.setup_url = setup_url.c_str();
+        }
+
+        if (force_setup) {
+            layout::draw_setup(src_canvas, device, device.setup_url);
+        } else {
+            uint8_t db_idx = settings.active_dashboard;
+            if (db_idx >= settings.dashboards.size()) db_idx = 0;
+            layout::draw_frame(src_canvas, store, device, settings.dashboards[db_idx]);
+        }
     }
 
     bool ok = false;
