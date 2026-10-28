@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
+	_ "embed"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -20,6 +21,12 @@ import (
 	"sync"
 	"time"
 )
+
+//go:embed default_config.json
+var embeddedDefaultConfig []byte
+
+//go:embed index.html
+var embeddedIndexHTML []byte
 
 // -----------------------------------------------------------------------------
 // Config structures matching firmware/src/config.h and config.cpp
@@ -892,9 +899,8 @@ func (d *Daemon) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data, err := os.ReadFile(d.htmlPath)
-	if err != nil {
-		http.Error(w, "index.html not found: "+err.Error(), 500)
-		return
+	if err != nil || len(data) == 0 {
+		data = embeddedIndexHTML
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
@@ -1136,11 +1142,45 @@ func main() {
 	log.Printf("Starting Tablo PocketBook Daemon...")
 	log.Printf("Config: %s | Renderer: %s | Output: %s (rot: %s)", *cfgPath, *rendererPath, *imgPath, *rotMode)
 
-	// Load settings
+	// Load default settings
 	var settings Settings
+	if err := json.Unmarshal(embeddedDefaultConfig, &settings); err != nil {
+		log.Printf("Error parsing embedded default config: %v", err)
+	}
+
+	// Merge user settings if file exists
 	cfgBytes, err := os.ReadFile(*cfgPath)
 	if err == nil {
-		json.Unmarshal(cfgBytes, &settings)
+		var userSettings Settings
+		if err := json.Unmarshal(cfgBytes, &userSettings); err == nil {
+			if len(userSettings.Dashboards) > 0 {
+				settings.Dashboards = userSettings.Dashboards
+			}
+			if len(userSettings.Connectors) > 0 {
+				settings.Connectors = userSettings.Connectors
+			}
+			if userSettings.DeviceName != "" {
+				settings.DeviceName = userSettings.DeviceName
+			}
+			if userSettings.Lang != "" {
+				settings.Lang = userSettings.Lang
+			}
+			if userSettings.City != "" {
+				settings.City = userSettings.City
+			}
+			if userSettings.CityLat != 0 {
+				settings.CityLat = userSettings.CityLat
+			}
+			if userSettings.CityLon != 0 {
+				settings.CityLon = userSettings.CityLon
+			}
+			settings.TimezoneMinutes = userSettings.TimezoneMinutes
+			settings.ActiveDashboard = userSettings.ActiveDashboard
+		}
+	} else {
+		// Save default config so the file exists on device
+		data, _ := json.MarshalIndent(settings, "", "  ")
+		os.WriteFile(*cfgPath, data, 0644)
 	}
 
 	d := &Daemon{

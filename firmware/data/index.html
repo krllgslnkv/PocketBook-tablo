@@ -239,24 +239,9 @@
 
 <main>
 
-  <section id="wifi-section">
-    <h2 data-i18n="section.network">Network</h2>
-    <div id="saved-networks"><p class="empty" data-i18n="net.none">No saved networks</p></div>
-    <button type="button" class="secondary full" id="scan-btn" data-i18n="net.scan">Scan networks</button>
-    <div id="scan-list"></div>
-    <div id="add-network-form" hidden>
-      <label id="add-ssid-label"></label>
-      <input id="add-password" type="password" placeholder="Network password" data-i18n-placeholder="net.password.ph">
-      <div class="actions">
-        <button type="button" id="add-network-confirm" data-i18n="btn.add">Add</button>
-        <button type="button" class="secondary" id="add-network-cancel" data-i18n="btn.cancel">Cancel</button>
-      </div>
-    </div>
-  </section>
-
   <section id="dashboards-section">
     <h2 data-i18n="section.screens">Screens</h2>
-    <div class="canvas-wrap"><canvas id="preview-canvas" width="800" height="480"></canvas></div>
+    <div class="canvas-wrap"><canvas id="preview-canvas" width="800" height="600"></canvas></div>
     <div id="dashboards-box"><p class="empty" data-i18n="loading">Loading…</p></div>
   </section>
 
@@ -1223,6 +1208,7 @@ function renderSources() {
 
 function renderNetworks() {
   var box = el('saved-networks');
+  if (!box) return;
   if (state.networks.length === 0) {
     box.innerHTML = '<p class="empty">' + t('net.none') + '</p>';
     return;
@@ -1243,6 +1229,7 @@ function renderNetworks() {
 function renderScanList(results) {
   state.scanResults = results;
   var box = el('scan-list');
+  if (!box) return;
   if (!results || results.length === 0) {
     box.innerHTML = '<p class="empty">' + t('scan.none') + '</p>';
     return;
@@ -1265,6 +1252,7 @@ function renderScanList(results) {
 // он true, результат может быть пустым или устаревшим, спрашиваем ещё раз
 // через полторы секунды.
 function pollScan() {
+  if (!el('scan-list')) return;
   fetchJSON('/api/scan').then(function (res) {
     renderScanList(res.networks || []);
     if (res.scanning) {
