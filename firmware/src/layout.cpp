@@ -617,25 +617,25 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
                       "Наведите камеру смартфона на QR-код справа,", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "чтобы настроить экраны, виджеты и ключи источников.", Color::Black, 1, false);
+                      "чтобы настроить дашборд, экраны и источники данных.", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Читалку не нужно подключать по USB к компьютеру —", Color::Black, 1, false);
+                      "Подключение к компьютеру не требуется —", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "все настройки передаются автономно по Wi-Fi.", Color::Black, 1, false);
+                      "все настройки применяются по Wi-Fi.", Color::Black, 1, false);
         } else {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Point your smartphone camera at the QR code on the right", Color::Black, 1, false);
+                      "Point your phone camera at the QR code on the right", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "to configure screens, widgets and data sources.", Color::Black, 1, false);
+                      "to configure dashboards, screens and data sources.", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "No USB connection to PC required —", Color::Black, 1, false);
+                      "No computer connection required —", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "all changes sync autonomously over Wi-Fi.", Color::Black, 1, false);
+                      "all changes apply over Wi-Fi.", Color::Black, 1, false);
         }
     } else {
         int16_t y = 90;
@@ -649,13 +649,13 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
 
         if (is_ru) {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Подключите PocketBook к Wi-Fi в настройках читалки.", Color::Black, 1, false);
+                      "Подключитесь к сети Wi-Fi.", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Здесь появится адрес и QR-код для настройки.", Color::Black, 1, false);
         } else {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Connect PocketBook to Wi-Fi in device settings.", Color::Black, 1, false);
+                      "Connect to a Wi-Fi network.", Color::Black, 1, false);
             y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Setup URL and QR code will appear here.", Color::Black, 1, false);
