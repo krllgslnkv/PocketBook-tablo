@@ -100,13 +100,19 @@ void draw_battery_icon(Canvas& c, int16_t x, int16_t y, int8_t pct) {
 
 // ── шапка ──
 
-void draw_header(Canvas& c, const DeviceInfo& d) {
+void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = true) {
     Civil now_civil = to_civil(d.now, d.timezone_minutes);
 
     char date_buf[48];
     std::snprintf(date_buf, sizeof(date_buf), "%s · %d %s", i18n::weekday(now_civil.weekday),
                   now_civil.day, i18n::month(now_civil.month - 1));
     draw_text(c, fonts::Terminus24, MARGIN, 32, date_buf, Color::Black, 1, /*bold=*/true);
+
+    if (show_setup_url && d.setup_url.length() > 0) {
+        int16_t url_w = text_width(fonts::Terminus14, d.setup_url.c_str());
+        int16_t url_x = static_cast<int16_t>((c.width() - url_w) / 2);
+        draw_text(c, fonts::Terminus14, url_x, 38, d.setup_url.c_str(), Color::Black, 1, false);
+    }
 
     char clock_buf[24];
     if (d.next_update_at > 0) {
@@ -580,7 +586,7 @@ void draw_ap_credentials(Canvas& canvas, const String& ssid, const String& passw
 
 void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_url) {
     canvas.fill(Color::White);
-    draw_header(canvas, device);
+    draw_header(canvas, device, /*show_setup_url=*/false);
 
     const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
 

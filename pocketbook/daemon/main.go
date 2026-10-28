@@ -79,6 +79,7 @@ type Network struct {
 }
 
 type Settings struct {
+	Configured      bool        `json:"configured"`
 	DeviceName      string      `json:"device_name"`
 	Lang            string      `json:"lang"`
 	TimezoneMinutes int         `json:"timezone_minutes"`
@@ -142,6 +143,7 @@ type Daemon struct {
 	slots        map[string]Slot
 	failed       map[string]string
 	lastPolled   map[string]time.Time
+	lastIP       string
 	forceRedraw  bool
 }
 
@@ -945,6 +947,7 @@ func (d *Daemon) renderFrame() error {
 	}
 
 	d.mu.Lock()
+	configured := d.settings.Configured
 	payload := StorePayload{
 		Device: DeviceInfo{
 			BatteryPct:      readBattery(),
@@ -977,6 +980,9 @@ func (d *Daemon) renderFrame() error {
 	}
 	if setupURL != "" {
 		args = append(args, "-setup-url", setupURL)
+	}
+	if !configured {
+		args = append(args, "-setup")
 	}
 
 	cmd := exec.Command(d.rendererPath, args...)
@@ -1088,6 +1094,7 @@ func (d *Daemon) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	newCfg.Configured = true
 	d.settings = newCfg
 	// Save to config.json
 	data, _ := json.MarshalIndent(d.settings, "", "  ")
@@ -1314,11 +1321,14 @@ func main() {
 		slots:        make(map[string]Slot),
 		failed:       make(map[string]string),
 		lastPolled:   make(map[string]time.Time),
+		lastIP:       getLocalIP(),
 	}
 
 	// Initial poll and frame render
-	d.pollAllDue()
-	time.Sleep(2 * time.Second)
+	if settings.Configured {
+		d.pollAllDue()
+		time.Sleep(2 * time.Second)
+	}
 	if err := d.renderFrame(); err != nil {
 		log.Printf("Warning during initial render: %v", err)
 	}
@@ -1355,18 +1365,30 @@ func main() {
 	}()
 
 	// Background ticker loop
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	lastHourFull := time.Now()
+	lastPoll := time.Time{}
 
 	for range ticker.C {
-		d.pollAllDue()
+		curIP := getLocalIP()
 		d.mu.Lock()
+		if curIP != d.lastIP {
+			log.Printf("IP changed: %q -> %q, forcing redraw", d.lastIP, curIP)
+			d.lastIP = curIP
+			d.forceRedraw = true
+		}
 		force := d.forceRedraw
 		d.forceRedraw = false
+		configured := d.settings.Configured
 		d.mu.Unlock()
 
-		if force || time.Since(lastHourFull) >= 5*time.Minute {
+		if configured && time.Since(lastPoll) >= 30*time.Second {
+			lastPoll = time.Now()
+			d.pollAllDue()
+		}
+
+		if force || (configured && time.Since(lastHourFull) >= 5*time.Minute) {
 			lastHourFull = time.Now()
 			if err := d.renderFrame(); err != nil {
 				log.Printf("Render error: %v", err)

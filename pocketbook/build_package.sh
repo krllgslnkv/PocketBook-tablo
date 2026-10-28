@@ -46,6 +46,7 @@ echo "==> 4. Generating pre-rendered boot / live image..."
 docker run --rm -v "$ROOT":/workspace -w /workspace tablo-builder \
     qemu-arm-static ./pocketbook/tablo_render_arm \
     -config pocketbook/default_config.json \
+    -setup \
     -out dist_pb/Photo/tablo_live.png \
     -rot right
 
