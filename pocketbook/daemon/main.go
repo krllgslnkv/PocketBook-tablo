@@ -1785,8 +1785,16 @@ func main() {
 		Handler: nil,
 	}
 
-	// Start mDNS responder for pbtablo-setup.local, tablo.local, tablo-setup.local
-	startMDNSResponder([]string{"pbtablo-setup.local", "tablo.local", "tablo-setup.local"})
+	// Start mDNS responder strictly for pbtablo-setup.local (no short variants)
+	devName := strings.TrimSpace(d.settings.DeviceName)
+	if devName == "" {
+		devName = "pbtablo-setup"
+	}
+	mdnsNames := []string{"pbtablo-setup.local"}
+	if devName != "pbtablo-setup" {
+		mdnsNames = append(mdnsNames, devName+".local")
+	}
+	startMDNSResponder(mdnsNames)
 
 	go func() {
 		log.Printf("Tablo Web Setup Portal listening on http://0.0.0.0:%d", *port)

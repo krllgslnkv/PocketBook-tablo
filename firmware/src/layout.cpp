@@ -589,31 +589,30 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     draw_header(canvas, device, /*show_setup_url=*/false);
 
     const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
+    String url = setup_url.length() > 0 ? setup_url : String("http://pbtablo-setup.local:8080");
 
-    if (setup_url.length() > 0) {
-        // 1. Сверху по центру адрес
-        const int16_t url_w = text_width(fonts::Terminus24, setup_url.c_str());
-        const int16_t url_x = static_cast<int16_t>((canvas.width() - url_w) / 2);
-        const int16_t url_y = 105;
-        draw_text(canvas, fonts::Terminus24, url_x, url_y, setup_url.c_str(), Color::Black, 1, /*bold=*/true);
+    // 1. Сверху по центру адрес
+    const int16_t url_w = text_width(fonts::Terminus24, url.c_str());
+    const int16_t url_x = static_cast<int16_t>((canvas.width() - url_w) / 2);
+    const int16_t url_y = 105;
+    draw_text(canvas, fonts::Terminus24, url_x, url_y, url.c_str(), Color::Black, 1, /*bold=*/true);
 
-        // 2. Ниже по центру большой QR-код
-        constexpr uint8_t kModulePx = 7;
-        constexpr uint8_t kQuietModules = 4;
-        const int16_t qr_side = wifi_qr::side_for(kModulePx, kQuietModules);  // 343px
-        const int16_t qr_x = static_cast<int16_t>((canvas.width() - qr_side) / 2);
-        const int16_t qr_y = 150;
+    // 2. Ниже по центру большой QR-код
+    constexpr uint8_t kModulePx = 7;
+    constexpr uint8_t kQuietModules = 4;
+    const int16_t qr_side = wifi_qr::side_for(kModulePx, kQuietModules);  // 343px
+    const int16_t qr_x = static_cast<int16_t>((canvas.width() - qr_side) / 2);
+    const int16_t qr_y = 150;
 
-        wifi_qr::draw(canvas, qr_x, qr_y, setup_url, kModulePx, kQuietModules);
-    } else {
-        // Wi-Fi не подключен — строка по центру экрана
-        const char* msg = is_ru ? "Подключите PocketBook к сети Wi-Fi"
-                                : "Connect PocketBook to Wi-Fi";
-        const int16_t msg_w = text_width(fonts::Terminus24, msg);
-        const int16_t msg_x = static_cast<int16_t>((canvas.width() - msg_w) / 2);
-        const int16_t msg_y = static_cast<int16_t>(HEADER_RULE_Y + (canvas.height() - HEADER_RULE_Y) / 2);
-        draw_text(canvas, fonts::Terminus24, msg_x, msg_y, msg, Color::Black, 1, /*bold=*/true);
-    }
+    wifi_qr::draw(canvas, qr_x, qr_y, url, kModulePx, kQuietModules);
+
+    // 3. Внизу экрана пояснение
+    const char* hint = is_ru ? "Откройте адрес в браузере или отсканируйте QR-код"
+                             : "Open the address in your browser or scan the QR code";
+    const int16_t hint_w = text_width(fonts::Terminus16, hint);
+    const int16_t hint_x = static_cast<int16_t>((canvas.width() - hint_w) / 2);
+    const int16_t hint_y = static_cast<int16_t>(canvas.height() - 40);
+    draw_text(canvas, fonts::Terminus16, hint_x, hint_y, hint, Color::Black, 1, false);
 }
 
 }  // namespace layout
