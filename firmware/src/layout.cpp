@@ -100,7 +100,7 @@ void draw_battery_icon(Canvas& c, int16_t x, int16_t y, int8_t pct) {
 
 // ── шапка ──
 
-void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = true) {
+void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = false) {
     Civil now_civil = to_civil(d.now, d.timezone_minutes);
 
     char date_buf[48];

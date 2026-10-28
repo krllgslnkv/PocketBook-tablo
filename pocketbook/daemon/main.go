@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -297,6 +298,90 @@ func getHTTPClient(timeout time.Duration) *http.Client {
 			},
 		},
 	}
+}
+
+func startMDNSResponder(names []string) {
+	go func() {
+		addr, err := net.ResolveUDPAddr("udp4", "224.0.0.251:5353")
+		if err != nil {
+			log.Printf("mDNS: resolve error: %v", err)
+			return
+		}
+
+		conn, err := net.ListenMulticastUDP("udp4", nil, addr)
+		if err != nil {
+			log.Printf("mDNS: listen error: %v", err)
+			return
+		}
+		defer conn.Close()
+		log.Printf("mDNS responder listening for: %v", names)
+
+		type Entry struct {
+			rawName   string
+			nameBytes []byte
+		}
+		var entries []Entry
+		for _, name := range names {
+			clean := strings.ToLower(strings.TrimSuffix(name, "."))
+			parts := strings.Split(clean, ".")
+			var buf []byte
+			for _, p := range parts {
+				buf = append(buf, byte(len(p)))
+				buf = append(buf, []byte(p)...)
+			}
+			buf = append(buf, 0x00)
+			entries = append(entries, Entry{rawName: clean, nameBytes: buf})
+		}
+
+		packet := make([]byte, 1500)
+		for {
+			n, src, err := conn.ReadFrom(packet)
+			if err != nil {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+			if n < 12 {
+				continue
+			}
+
+			// QR bit in flags (byte 2 bit 7): 0 = Query, 1 = Response
+			flags := binary.BigEndian.Uint16(packet[2:4])
+			if flags&0x8000 != 0 {
+				continue
+			}
+
+			qdcount := binary.BigEndian.Uint16(packet[4:6])
+			if qdcount == 0 {
+				continue
+			}
+
+			ipStr := getLocalIP()
+			ip := net.ParseIP(ipStr).To4()
+			if ip == nil {
+				continue
+			}
+
+			for _, entry := range entries {
+				if bytes.Contains(packet[12:n], entry.nameBytes) {
+					var resp bytes.Buffer
+					// Header: ID=0, Flags=0x8400 (Authoritative Response), QD=0, AN=1, NS=0, AR=0
+					resp.Write([]byte{0x00, 0x00, 0x84, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00})
+					// Answer RR: Name
+					resp.Write(entry.nameBytes)
+					// Type A (1), Class IN with cache-flush (0x8001), TTL 120s (0x00000078), DataLen 4 (0x0004)
+					resp.Write([]byte{0x00, 0x01, 0x80, 0x01, 0x00, 0x00, 0x00, 0x78, 0x00, 0x04})
+					resp.Write(ip)
+
+					b := resp.Bytes()
+					conn.WriteTo(b, addr)
+					if src != nil {
+						conn.WriteTo(b, src)
+					}
+					break
+				}
+			}
+		}
+	}()
 }
 
 // -----------------------------------------------------------------------------
@@ -1248,14 +1333,17 @@ func (d *Daemon) pollAllDue() {
 // -----------------------------------------------------------------------------
 
 func (d *Daemon) renderFrame() error {
-	ip := getLocalIP()
-	setupURL := ""
-	if ip != "" {
+	setupURL := "http://pbtablo-setup.local:8080"
+	if ip := getLocalIP(); ip != "" && d.port != 8080 {
 		setupURL = fmt.Sprintf("http://%s:%d", ip, d.port)
 	}
 
 	d.mu.Lock()
 	configured := d.settings.Configured
+	deviceSetupURL := ""
+	if !configured {
+		deviceSetupURL = setupURL
+	}
 	payload := StorePayload{
 		Device: DeviceInfo{
 			BatteryPct:      readBattery(),
@@ -1264,7 +1352,7 @@ func (d *Daemon) renderFrame() error {
 			NextUpdateAt:    uint32(time.Now().Unix() + 300),
 			TimezoneMinutes: d.settings.TimezoneMinutes,
 			Lang:            d.settings.Lang,
-			SetupURL:        setupURL,
+			SetupURL:        deviceSetupURL,
 		},
 		Slots:  d.slots,
 		Failed: d.failed,
@@ -1286,11 +1374,11 @@ func (d *Daemon) renderFrame() error {
 		"-out", d.imgPath,
 		"-rot", d.rotMode,
 	}
-	if setupURL != "" {
-		args = append(args, "-setup-url", setupURL)
-	}
 	if !configured {
 		args = append(args, "-setup")
+		if setupURL != "" {
+			args = append(args, "-setup-url", setupURL)
+		}
 	}
 
 	cmd := exec.Command(d.rendererPath, args...)
@@ -1474,10 +1562,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := getLocalIP()
-	setupURL := ""
-	if ip != "" {
-		setupURL = fmt.Sprintf("http://%s:%d", ip, d.port)
-	}
+	setupURL := "http://pbtablo-setup.local:8080"
 
 	resp := map[string]interface{}{
 		"time_synced": true,
@@ -1700,12 +1785,26 @@ func main() {
 		Handler: nil,
 	}
 
+	// Start mDNS responder for pbtablo-setup.local, tablo.local, tablo-setup.local
+	startMDNSResponder([]string{"pbtablo-setup.local", "tablo.local", "tablo-setup.local"})
+
 	go func() {
 		log.Printf("Tablo Web Setup Portal listening on http://0.0.0.0:%d", *port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
+
+	// Also listen on standard port 80 so users can open http://pbtablo-setup.local directly
+	if *port != 80 {
+		go func() {
+			server80 := &http.Server{
+				Addr:    ":80",
+				Handler: nil,
+			}
+			server80.ListenAndServe()
+		}()
+	}
 
 	// Background ticker loop
 	ticker := time.NewTicker(5 * time.Second)
