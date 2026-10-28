@@ -589,7 +589,7 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     draw_header(canvas, device, /*show_setup_url=*/false);
 
     const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
-    String url = setup_url.length() > 0 ? setup_url : String("http://pbtablo-setup.local");
+    String url = setup_url.length() > 0 ? setup_url : String("http://pbtablo-setup.local:8080");
 
     // 1. Сверху по центру адрес
     const int16_t url_w = text_width(fonts::Terminus24, url.c_str());

@@ -47,7 +47,7 @@ docker run --rm -v "$ROOT":/workspace -w /workspace tablo-builder \
     qemu-arm-static ./pocketbook/tablo_render_arm \
     -config pocketbook/default_config.json \
     -setup \
-    -setup-url "http://pbtablo-setup.local" \
+    -setup-url "http://pbtablo-setup.local:8080" \
     -out dist_pb/Photo/tablo_live.png \
     -rot right
 

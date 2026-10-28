@@ -1333,7 +1333,7 @@ func (d *Daemon) pollAllDue() {
 // -----------------------------------------------------------------------------
 
 func (d *Daemon) renderFrame() error {
-	setupURL := "http://pbtablo-setup.local"
+	setupURL := "http://pbtablo-setup.local:8080"
 
 	d.mu.Lock()
 	configured := d.settings.Configured
@@ -1559,7 +1559,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := getLocalIP()
-	setupURL := "http://pbtablo-setup.local"
+	setupURL := "http://pbtablo-setup.local:8080"
 
 	resp := map[string]interface{}{
 		"time_synced": true,
@@ -1799,17 +1799,6 @@ func main() {
 			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
-
-	// Also listen on standard port 80 so users can open http://pbtablo-setup.local directly
-	if *port != 80 {
-		go func() {
-			server80 := &http.Server{
-				Addr:    ":80",
-				Handler: nil,
-			}
-			server80.ListenAndServe()
-		}()
-	}
 
 	// Background ticker loop
 	ticker := time.NewTicker(5 * time.Second)
