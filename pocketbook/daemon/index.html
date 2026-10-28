@@ -275,7 +275,7 @@
 <footer>
   <button type="button" id="save-btn" data-i18n="save" disabled>Save</button>
   <button type="button" class="secondary" id="reboot-btn" data-i18n="reboot">Reboot</button>
-  <p class="setup-url-footer" style="margin-top:14px;color:#888;font-size:13px;text-align:center;">http://pbtablo-setup.local:8080</p>
+  <p class="setup-url-footer" style="margin-top:14px;color:#888;font-size:13px;text-align:center;">http://pbtablo-setup.local</p>
 </footer>
 
 <script>
@@ -311,7 +311,7 @@ var I18N = {
     'sources.addCustom': '+ Add source',
     'device.name': 'Device name',
     'device.lang': 'Language',
-    'hint.device.url': 'The page is available at http://{0}.local:8080 (or http://{0}.local) from the same network',
+    'hint.device.url': 'The page is available at http://{0}.local from the same network',
     'hint.city.pending': 'Coordinates will be resolved once connected to a network',
     'hint.city.coords': 'Coordinates: {0}, {1}',
     'token.set': 'Set · leave empty to keep',
@@ -432,7 +432,7 @@ var I18N = {
     'sources.addCustom': '+ добавить источник',
     'device.name': 'Имя устройства',
     'device.lang': 'Язык',
-    'hint.device.url': 'страница доступна как http://{0}.local:8080 (или http://{0}.local) из той же сети',
+    'hint.device.url': 'страница доступна как http://{0}.local из той же сети',
     'hint.city.pending': 'координаты определятся при подключении к сети',
     'hint.city.coords': 'координаты: {0}, {1}',
     'token.set': 'задан · оставьте пустым, чтобы не менять',
@@ -759,7 +759,7 @@ function updateDeviceNameHint(name) {
   }
   var footerEl = document.querySelector('.setup-url-footer');
   if (footerEl) {
-    footerEl.textContent = 'http://' + devName + '.local:8080';
+    footerEl.textContent = 'http://' + devName + '.local';
   }
 }
 

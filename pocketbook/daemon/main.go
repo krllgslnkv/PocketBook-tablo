@@ -1333,10 +1333,7 @@ func (d *Daemon) pollAllDue() {
 // -----------------------------------------------------------------------------
 
 func (d *Daemon) renderFrame() error {
-	setupURL := "http://pbtablo-setup.local:8080"
-	if ip := getLocalIP(); ip != "" && d.port != 8080 {
-		setupURL = fmt.Sprintf("http://%s:%d", ip, d.port)
-	}
+	setupURL := "http://pbtablo-setup.local"
 
 	d.mu.Lock()
 	configured := d.settings.Configured
@@ -1562,7 +1559,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := getLocalIP()
-	setupURL := "http://pbtablo-setup.local:8080"
+	setupURL := "http://pbtablo-setup.local"
 
 	resp := map[string]interface{}{
 		"time_synced": true,
