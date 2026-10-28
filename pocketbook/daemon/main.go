@@ -283,12 +283,24 @@ func getLocalIP() string {
 	return ""
 }
 
+func getHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true, // PocketBook OS has no CA certificate bundle in /etc/ssl
+			},
+		},
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Connector Pollers
 // -----------------------------------------------------------------------------
 
 func (d *Daemon) pollBinanceTicker(c Connector) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Get(c.URL)
 	if err != nil {
 		d.mu.Lock()
@@ -336,7 +348,7 @@ func (d *Daemon) pollBinanceTicker(c Connector) {
 }
 
 func (d *Daemon) pollBinanceKlines(c Connector) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Get(c.URL)
 	if err != nil {
 		return
@@ -374,7 +386,7 @@ func (d *Daemon) pollBinanceKlines(c Connector) {
 }
 
 func (d *Daemon) pollFiatRates(c Connector) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Get(c.URL)
 	if err != nil {
 		d.mu.Lock()
@@ -444,7 +456,7 @@ func (d *Daemon) pollWeather(c Connector) {
 	}
 	url := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto", lat, lon)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Get(url)
 	if err != nil {
 		d.mu.Lock()
@@ -601,7 +613,7 @@ func (d *Daemon) pollClaudeLimits(c Connector) {
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("User-Agent", "tablo/0.1.0")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		d.mu.Lock()
@@ -676,7 +688,7 @@ func (d *Daemon) pollCodexLimits(c Connector) {
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 	req.Header.Set("User-Agent", "tablo/0.1.0")
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := getHTTPClient(5 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		d.mu.Lock()
@@ -741,7 +753,7 @@ func (d *Daemon) pollIMAP(c Connector) {
 		host += ":993"
 	}
 
-	conn, err := tls.Dial("tcp", host, &tls.Config{ServerName: strings.Split(host, ":")[0]})
+	conn, err := tls.Dial("tcp", host, &tls.Config{ServerName: strings.Split(host, ":")[0], InsecureSkipVerify: true})
 	if err != nil {
 		d.mu.Lock()
 		d.failed[c.ID] = "IMAP TLS error: " + err.Error()
@@ -1199,6 +1211,11 @@ func main() {
 	rotMode := flag.String("rot", "right", "Rotation mode: right (600x800 PB625), left, or none (800x600)")
 	once := flag.Bool("once", false, "Fetch once, render once, and exit")
 	flag.Parse()
+
+	// Disable TLS certificate verification on PocketBook (no root CA bundle installed in OS)
+	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
+		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 
 	// Locate files if defaults don't exist in current dir
 	if _, err := os.Stat(*cfgPath); os.IsNotExist(err) {

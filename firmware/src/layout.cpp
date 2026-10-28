@@ -13,6 +13,7 @@
 #include "layout.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "../assets/terminus_14.h"
@@ -400,7 +401,18 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
         }
     }
 
-    if (!row_has[0] && !row_has[1]) {
+    bool has_any_data = false;
+    for (const auto& kv : store.all()) {
+        const char* key = kv.first.c_str();
+        const size_t len = kv.first.length();
+        const bool is_status = (len >= 7 && std::strcmp(key + len - 7, ".status") == 0);
+        if (!is_status && !kv.second.empty()) {
+            has_any_data = true;
+            break;
+        }
+    }
+
+    if (!has_any_data || (!row_has[0] && !row_has[1])) {
         draw_setup(canvas, device, device.setup_url);
         return;
     }
