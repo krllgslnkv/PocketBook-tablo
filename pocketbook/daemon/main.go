@@ -1007,15 +1007,18 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 	}
 
 	pct := target.RemainingFraction * 100.0
-	resetStr := ""
+	resetStr := "5ч"
+	if d.settings.Lang != "ru" {
+		resetStr = "5h"
+	}
 	if target.ResetTime != "" {
 		if t, err := time.Parse(time.RFC3339, target.ResetTime); err == nil {
 			tzOffset := time.Duration(d.settings.TimezoneMinutes) * time.Minute
 			localT := t.UTC().Add(tzOffset)
 			if d.settings.Lang == "ru" {
-				resetStr = fmt.Sprintf("сброс %02d:%02d", localT.Hour(), localT.Minute())
+				resetStr = fmt.Sprintf("5ч - сброс %02d:%02d", localT.Hour(), localT.Minute())
 			} else {
-				resetStr = fmt.Sprintf("resets %02d:%02d", localT.Hour(), localT.Minute())
+				resetStr = fmt.Sprintf("5h - resets %02d:%02d", localT.Hour(), localT.Minute())
 			}
 		}
 	}
@@ -1479,6 +1482,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"time_synced": true,
 		"slots":       slotsStatus,
+		"failed":      d.failed,
 		"ip":          ip,
 		"setup_url":   setupURL,
 	}
@@ -1681,6 +1685,15 @@ func main() {
 	http.HandleFunc("/api/scan", d.handleScan)
 	http.HandleFunc("/api/reboot", d.handleReboot)
 	http.HandleFunc("/api/preview.png", d.handlePreview)
+	http.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile("/tmp/tablo.log")
+		if err != nil {
+			http.Error(w, err.Error(), 404)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write(data)
+	})
 
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", *port),
