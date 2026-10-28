@@ -382,8 +382,11 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
     const Slot* claude_5h = store.find("limit.claude.5h");
     const Slot* claude_week = store.find("limit.claude.week");
     const Slot* codex = store.find("limit.codex");
+    const Slot* antigravity_5h = store.find("limit.antigravity.5h");
+    const Slot* antigravity_week = store.find("limit.antigravity.week");
     bool has_claude = layout::has_data(claude_5h) || layout::has_data(claude_week);
     bool has_codex = layout::has_data(codex);
+    bool has_antigravity = layout::has_data(antigravity_5h) || layout::has_data(antigravity_week);
     // Причина отказа источника вместо исчезновения строки: пока данных нет,
     // но коннектор объяснил почему (`<id>.status`, slots::Store::mark_failed),
     // строка остаётся — заголовок и текст причины на месте шкалы. Владелец
@@ -391,7 +394,8 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
     // «сервер просит подождать (429)» — как состояние (2026-09-21).
     const char* claude_error = limits_error_text(store, "claude.status", has_claude);
     const char* codex_error = limits_error_text(store, "codex.status", has_codex);
-    bool has_limits = show_limits && (has_claude || has_codex || claude_error || codex_error);
+    const char* antigravity_error = limits_error_text(store, "antigravity.status", has_antigravity);
+    bool has_limits = show_limits && (has_claude || has_codex || has_antigravity || claude_error || codex_error || antigravity_error);
 
     const Slot* co2 = store.find("co2");
     const Slot* tvoc = store.find("tvoc");
@@ -462,6 +466,41 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             draw_text(c, fonts::PlexMono20, static_cast<int16_t>(r.x + r.w - pw),
                       static_cast<int16_t>(bar_y + 12), pct.c_str(), Color::Black);
             cursor = static_cast<int16_t>(bar_y + 14);
+        }
+
+        if (antigravity_error) {
+            cursor = draw_limit_error_row(c, r, static_cast<int16_t>(cursor + (has_claude || has_codex || claude_error || codex_error ? 1 : 0)),
+                                          "Antigravity", antigravity_error);
+        } else if (has_antigravity) {
+            int16_t title_baseline =
+                static_cast<int16_t>(cursor + (has_claude || has_codex || claude_error || codex_error ? 27 : 26));
+            draw_text(c, fonts::Terminus16, r.x, title_baseline, "Antigravity", Color::Black, 1, /*bold=*/true);
+            const Slot* reset = store.find("limit.antigravity.reset");
+            if (layout::has_data(reset)) {
+                int16_t rw = text_width(fonts::Terminus14, reset->text.c_str());
+                draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - rw),
+                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
+            }
+            int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
+            if (antigravity_week != nullptr && layout::has_data(antigravity_week)) {
+                int16_t half = static_cast<int16_t>((r.w - 20) / 2);
+                draw_limit_row(c, Rect{r.x, bar_y, half, 14}, i18n::tr(i18n::Str::kFiveHours), antigravity_5h, d.now, 10);
+                c.vline(static_cast<int16_t>(r.x + half + 10), bar_y, 14, Color::Black);
+                draw_limit_row(c, Rect{static_cast<int16_t>(r.x + half + 20), bar_y, half, 14},
+                               i18n::tr(i18n::Str::kWeek), antigravity_week, d.now, 10);
+                cursor = static_cast<int16_t>(bar_y + 14);
+            } else if (antigravity_5h != nullptr && layout::has_data(antigravity_5h)) {
+                String pct = layout::format_percent(antigravity_5h, d.now);
+                int16_t pw = text_width(fonts::PlexMono20, pct.c_str());
+                int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
+                if (bar_w > 0) {
+                    draw_segbar(c, Rect{r.x, bar_y, bar_w, 14}, 100.0f - antigravity_5h->number,
+                                layout::segments_for_width(bar_w));
+                }
+                draw_text(c, fonts::PlexMono20, static_cast<int16_t>(r.x + r.w - pw),
+                          static_cast<int16_t>(bar_y + 12), pct.c_str(), Color::Black);
+                cursor = static_cast<int16_t>(bar_y + 14);
+            }
         }
 
         if (has_air || air_error) {

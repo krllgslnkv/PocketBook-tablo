@@ -364,6 +364,7 @@ var I18N = {
     'dash.row.bottom': 'Bottom row',
     'preview.unnamed': 'Untitled',
     'preview.nodata': 'No data',
+    'card.antigravity.title': 'Antigravity',
     'card.claude.title': 'Claude',
     'card.codex.title': 'Codex',
     'card.mail.title': 'Mail',
@@ -376,6 +377,7 @@ var I18N = {
     'field.url': 'Address',
     'field.insecure': 'Skip certificate check (https)',
     'hint.changed.token': 'Address changed — enter the token again, or it won\'t be saved',
+    'card.antigravity.hint': 'On Mac: run <code>security find-generic-password -s gemini -a antigravity -w</code> and paste the result. The device will automatically refresh the token.',
     'card.claude.hint': 'On Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → fields <code>claudeAiOauth.accessToken</code> and <code>.refreshToken</code>. The refresh token shared with the CLI gets rotated — see docs/decisions.md, item 2.',
     'card.codex.hint': 'Source: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> and <code>tokens.refresh_token</code>. ' +
       'With a refresh token the device renews the pair by itself. Better to use a separate login for the device, so the pair isn\'t shared with Codex CLI: ' +
@@ -483,6 +485,7 @@ var I18N = {
     'dash.row.bottom': 'Нижний ряд',
     'preview.unnamed': 'без имени',
     'preview.nodata': 'нет данных',
+    'card.antigravity.title': 'Antigravity',
     'card.claude.title': 'Claude',
     'card.codex.title': 'Codex',
     'card.mail.title': 'Почта',
@@ -495,6 +498,7 @@ var I18N = {
     'field.url': 'Адрес',
     'field.insecure': 'Не проверять сертификат (https)',
     'hint.changed.token': 'адрес изменился — введите токен заново, иначе он не сохранится',
+    'card.antigravity.hint': 'На Mac: выполните в терминале <code>security find-generic-password -s gemini -a antigravity -w</code> и вставьте результат. Устройство само получит токен и будет автоматически его обновлять.',
     'card.claude.hint': 'На Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code> → поля <code>claudeAiOauth.accessToken</code> и <code>.refreshToken</code>. Общий refresh-токен с CLI ротируется — см. docs/decisions.md, п.2.',
     'card.codex.hint': 'Источник: <code>~/.codex/auth.json</code> → <code>tokens.access_token</code> и <code>tokens.refresh_token</code>. ' +
       'С refresh-токеном устройство обновляет пару само. Лучше отдельный вход для устройства, чтобы не делить пару с Codex CLI: ' +
@@ -549,6 +553,7 @@ var SLOTS = [
 // умеет его, либо владелец сам удалил из NVS раньше) — страница создаёт
 // заглушку сама, и он появится при первом же сохранении формы.
 var FACTORY_STUBS = [
+  { id: 'antigravity', kind: 'antigravity' },
   { id: 'claude', kind: 'anthropic' }, { id: 'codex', kind: 'codex' },
   { id: 'mail', kind: 'imap' }, { id: 'home', kind: 'homeassistant' },
   { id: 'btc', kind: 'http' }, { id: 'btc_history', kind: 'http' }, { id: 'fiat', kind: 'http' },
@@ -562,6 +567,7 @@ function isFactoryId(id) { return !!FACTORY_IDS[id]; }
 // карточка, по какому слоту показывать «обновлено N мин назад», и всегда ли
 // она считается настроенной (Курсы и Погода — публичные API без ключа).
 var SOURCE_CARDS = [
+  { key: 'antigravity', titleKey: 'card.antigravity.title', connIds: ['antigravity'], firstSlot: 'limit.antigravity.5h', always: false },
   { key: 'claude', titleKey: 'card.claude.title', connIds: ['claude'], firstSlot: 'limit.claude.5h', always: false },
   { key: 'codex', titleKey: 'card.codex.title', connIds: ['codex'], firstSlot: 'limit.codex', always: false },
   { key: 'mail', titleKey: 'card.mail.title', connIds: ['mail'], firstSlot: 'mail.unread', always: false },
@@ -656,6 +662,7 @@ function cardTitleByKey(key) {
 // co2/tvoc→Умный дом, btc/usd_rub/eur_rub→Курсы, weather.*→Погода. Слот вне
 // этого списка (свой источник) требования к карточке не несёт.
 function slotSourceCard(slot) {
+  if (slot.indexOf('limit.antigravity') === 0) return 'antigravity';
   if (slot.indexOf('limit.claude') === 0) return 'claude';
   if (slot.indexOf('limit.codex') === 0) return 'codex';
   if (slot.indexOf('mail.') === 0) return 'mail';
@@ -1087,6 +1094,14 @@ function drawPreview() {
 
 // ── Источники: заводские карточки по фиксированным id/kind ──
 
+function renderAntigravityCard() {
+  var c = conn('antigravity');
+  return '<div class="source-card" id="source-card-antigravity"><h3>' + t('card.antigravity.title') + '</h3>' + statusLineHtml('antigravity') +
+    '<label>' + t('field.token') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set || c.refresh_token_set) + '" data-conn-field="token" data-conn-id="antigravity"></label>' +
+    '<p class="hint">' + t('card.antigravity.hint') + '</p>' +
+    '</div>';
+}
+
 function renderClaudeCard() {
   var c = conn('claude');
   return '<div class="source-card" id="source-card-claude"><h3>' + t('card.claude.title') + '</h3>' + statusLineHtml('claude') +
@@ -1198,7 +1213,7 @@ function renderCustomConnectors() {
 }
 
 function renderSources() {
-  el('sources-list').innerHTML = renderClaudeCard() + renderCodexCard() + renderMailCard() +
+  el('sources-list').innerHTML = renderAntigravityCard() + renderClaudeCard() + renderCodexCard() + renderMailCard() +
     renderHomeCard() + renderRatesCard() + renderWeatherCard();
   el('custom-connectors').innerHTML = renderCustomConnectors();
   updateAllChangedHints();

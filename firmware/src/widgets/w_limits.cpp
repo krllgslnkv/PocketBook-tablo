@@ -18,17 +18,21 @@ using slots::Store;
 // имена внутри анонимного namespace не могут повторяться между файлами.
 const char* const kLimitsSlots[] = {
     "limit.claude.5h", "limit.claude.week", "limit.claude.reset",
-    "limit.codex",      "limit.codex.reset", "claude.status", "codex.status", nullptr,
+    "limit.codex",      "limit.codex.reset", "claude.status", "codex.status",
+    "limit.antigravity.5h", "limit.antigravity.week", "limit.antigravity.reset", "antigravity.status", nullptr,
 };
 
 bool limits_visible(const Store& store, const Instance&) {
     return layout::has_data(store.find("limit.claude.5h")) ||
            layout::has_data(store.find("limit.claude.week")) ||
            layout::has_data(store.find("limit.codex")) ||
+           layout::has_data(store.find("limit.antigravity.5h")) ||
+           layout::has_data(store.find("limit.antigravity.week")) ||
            // причина отказа источника тоже показывается (prims.cpp,
            // limits_error_text) — блок не исчезает, пока есть что сказать
            prims::has_failure_reason(store, "claude.status") ||
-           prims::has_failure_reason(store, "codex.status");
+           prims::has_failure_reason(store, "codex.status") ||
+           prims::has_failure_reason(store, "antigravity.status");
 }
 
 void limits_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const Instance&) {

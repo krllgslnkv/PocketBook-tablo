@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -743,6 +745,235 @@ func (d *Daemon) pollCodexLimits(c Connector) {
 	}
 }
 
+func (d *Daemon) pollAntigravityLimits(c Connector) {
+	token := c.Token
+	refreshToken := c.RefreshToken
+
+	// Support pasting raw base64 from macOS Keychain: `go-keyring-base64:<base64>`
+	if strings.HasPrefix(token, "go-keyring-base64:") {
+		rawB64 := strings.TrimPrefix(token, "go-keyring-base64:")
+		if decoded, err := base64.StdEncoding.DecodeString(rawB64); err == nil {
+			var parsed struct {
+				Token struct {
+					AccessToken  string `json:"access_token"`
+					RefreshToken string `json:"refresh_token"`
+				} `json:"token"`
+			}
+			if err := json.Unmarshal(decoded, &parsed); err == nil {
+				if parsed.Token.AccessToken != "" {
+					token = parsed.Token.AccessToken
+				}
+				if parsed.Token.RefreshToken != "" {
+					refreshToken = parsed.Token.RefreshToken
+				}
+			}
+		}
+	} else if strings.HasPrefix(token, "{") {
+		var parsed struct {
+			Token struct {
+				AccessToken  string `json:"access_token"`
+				RefreshToken string `json:"refresh_token"`
+			} `json:"token"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
+		}
+		if err := json.Unmarshal([]byte(token), &parsed); err == nil {
+			if parsed.Token.AccessToken != "" {
+				token = parsed.Token.AccessToken
+			} else if parsed.AccessToken != "" {
+				token = parsed.AccessToken
+			}
+			if parsed.Token.RefreshToken != "" {
+				refreshToken = parsed.Token.RefreshToken
+			} else if parsed.RefreshToken != "" {
+				refreshToken = parsed.RefreshToken
+			}
+		}
+	}
+
+	if token == "" && refreshToken == "" {
+		return
+	}
+
+	client := getHTTPClient(10 * time.Second)
+
+	// If token looks like a refresh token (starts with 1//), move it
+	if strings.HasPrefix(token, "1//") && refreshToken == "" {
+		refreshToken = token
+		token = ""
+	}
+
+	// If we have a refresh token and no access token, refresh right away
+	if refreshToken != "" && token == "" {
+		cID, _ := base64.StdEncoding.DecodeString("p1_b64")
+		cSec, _ := base64.StdEncoding.DecodeString("s1_b64")
+		form := url.Values{
+			"client_id":     {string(cID)},
+			"client_secret": {string(cSec)},
+			"refresh_token": {refreshToken},
+			"grant_type":    {"refresh_token"},
+		}
+		resp, err := client.PostForm("https://oauth2.googleapis.com/token", form)
+		if err == nil {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				var tr struct {
+					AccessToken string `json:"access_token"`
+				}
+				if err := json.NewDecoder(resp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
+					token = tr.AccessToken
+				}
+			}
+		}
+	}
+
+	if token == "" {
+		d.mu.Lock()
+		d.failed[c.ID] = "Antigravity token missing"
+		d.mu.Unlock()
+		return
+	}
+
+	req, err := http.NewRequest("POST", "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", bytes.NewBuffer([]byte("{}")))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "antigravity")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		d.mu.Lock()
+		d.failed[c.ID] = "Antigravity error: " + err.Error()
+		d.mu.Unlock()
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		if refreshToken != "" {
+			form := url.Values{
+				"client_id":     {"dummy_client_id"},
+				"client_secret": {"dummy_client_secret"},
+				"refresh_token": {refreshToken},
+				"grant_type":    {"refresh_token"},
+			}
+			rResp, rErr := client.PostForm("https://oauth2.googleapis.com/token", form)
+			if rErr == nil {
+				defer rResp.Body.Close()
+				if rResp.StatusCode == http.StatusOK {
+					var tr struct {
+						AccessToken string `json:"access_token"`
+					}
+					if err := json.NewDecoder(rResp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
+						token = tr.AccessToken
+						req2, _ := http.NewRequest("POST", "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", bytes.NewBuffer([]byte("{}")))
+						req2.Header.Set("Authorization", "Bearer "+token)
+						req2.Header.Set("Content-Type", "application/json")
+						req2.Header.Set("User-Agent", "antigravity")
+						if resp2, err2 := client.Do(req2); err2 == nil {
+							defer resp2.Body.Close()
+							resp = resp2
+						}
+					}
+				}
+			}
+		}
+		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+			d.mu.Lock()
+			d.failed[c.ID] = "Antigravity token expired"
+			d.mu.Unlock()
+			return
+		}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		d.mu.Lock()
+		d.failed[c.ID] = fmt.Sprintf("Antigravity HTTP %d", resp.StatusCode)
+		d.mu.Unlock()
+		return
+	}
+
+	var data struct {
+		Models map[string]struct {
+			QuotaInfo struct {
+				RemainingFraction float64 `json:"remainingFraction"`
+				ResetTime         string  `json:"resetTime"`
+			} `json:"quotaInfo"`
+		} `json:"models"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return
+	}
+
+	type Quota struct {
+		RemainingFraction float64
+		ResetTime         string
+	}
+	var target *Quota
+	for name, m := range data.Models {
+		if strings.Contains(name, "flash") && m.QuotaInfo.ResetTime != "" {
+			target = &Quota{
+				RemainingFraction: m.QuotaInfo.RemainingFraction,
+				ResetTime:         m.QuotaInfo.ResetTime,
+			}
+			break
+		}
+	}
+	if target == nil {
+		for _, m := range data.Models {
+			if m.QuotaInfo.ResetTime != "" {
+				target = &Quota{
+					RemainingFraction: m.QuotaInfo.RemainingFraction,
+					ResetTime:         m.QuotaInfo.ResetTime,
+				}
+				break
+			}
+		}
+	}
+
+	if target == nil {
+		return
+	}
+
+	pct := target.RemainingFraction * 100.0
+	resetStr := ""
+	if target.ResetTime != "" {
+		if t, err := time.Parse(time.RFC3339, target.ResetTime); err == nil {
+			tzOffset := time.Duration(d.settings.TimezoneMinutes) * time.Minute
+			localT := t.UTC().Add(tzOffset)
+			if d.settings.Lang == "ru" {
+				resetStr = fmt.Sprintf("сброс %02d:%02d", localT.Hour(), localT.Minute())
+			} else {
+				resetStr = fmt.Sprintf("resets %02d:%02d", localT.Hour(), localT.Minute())
+			}
+		}
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.failed, c.ID)
+	now := uint32(time.Now().Unix())
+
+	d.slots["limit.antigravity.5h"] = Slot{
+		Number:    pct,
+		Text:      fmt.Sprintf("%.0f%%", pct),
+		At:        now,
+		TTL:       300,
+		OK:        true,
+		Connector: c.ID,
+	}
+	d.slots["limit.antigravity.reset"] = Slot{
+		Text:      resetStr,
+		At:        now,
+		TTL:       300,
+		OK:        true,
+		Connector: c.ID,
+	}
+}
+
 func (d *Daemon) pollIMAP(c Connector) {
 	if c.Username == "" || c.Token == "" {
 		return
@@ -929,8 +1160,14 @@ func (d *Daemon) pollAllDue() {
 			go d.pollClaudeLimits(c)
 		case "codex":
 			go d.pollCodexLimits(c)
+		case "antigravity":
+			go d.pollAntigravityLimits(c)
 		case "imap":
 			go d.pollIMAP(c)
+		default:
+			if c.ID == "antigravity" {
+				go d.pollAntigravityLimits(c)
+			}
 		}
 	}
 }

@@ -17,17 +17,21 @@ using slots::Store;
 // Префикс limits_air_ — см. комментарий в widgets/w_markets.cpp.
 const char* const kLimitsAirSlots[] = {
     "limit.claude.5h", "limit.claude.week", "limit.claude.reset", "limit.codex",
-    "limit.codex.reset", "co2",              "tvoc",               nullptr,
+    "limit.codex.reset", "limit.antigravity.5h", "limit.antigravity.week", "limit.antigravity.reset",
+    "co2",              "tvoc",               nullptr,
 };
 
 bool limits_air_visible(const Store& store, const Instance&) {
     return layout::has_data(store.find("limit.claude.5h")) ||
            layout::has_data(store.find("limit.claude.week")) ||
            layout::has_data(store.find("limit.codex")) ||
+           layout::has_data(store.find("limit.antigravity.5h")) ||
+           layout::has_data(store.find("limit.antigravity.week")) ||
            // причина отказа источника тоже показывается (prims.cpp,
            // limits_error_text) — блок не исчезает, пока есть что сказать
            prims::has_failure_reason(store, "claude.status") ||
            prims::has_failure_reason(store, "codex.status") ||
+           prims::has_failure_reason(store, "antigravity.status") ||
            prims::has_failure_reason(store, "home.status") || layout::has_data(store.find("co2")) ||
            layout::has_data(store.find("tvoc"));
 }
