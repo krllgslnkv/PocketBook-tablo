@@ -745,30 +745,50 @@ func (d *Daemon) pollCodexLimits(c Connector) {
 	}
 }
 
-func (d *Daemon) pollAntigravityLimits(c Connector) {
-	token := c.Token
-	refreshToken := c.RefreshToken
+func parseAntigravityToken(tokenStr string) (accessToken string, refreshToken string) {
+	tokenStr = strings.TrimSpace(tokenStr)
+	tokenStr = strings.Trim(tokenStr, "\"'`")
+	if tokenStr == "" {
+		return "", ""
+	}
 
-	// Support pasting raw base64 from macOS Keychain: `go-keyring-base64:<base64>`
-	if strings.HasPrefix(token, "go-keyring-base64:") {
-		rawB64 := strings.TrimPrefix(token, "go-keyring-base64:")
-		if decoded, err := base64.StdEncoding.DecodeString(rawB64); err == nil {
-			var parsed struct {
-				Token struct {
-					AccessToken  string `json:"access_token"`
-					RefreshToken string `json:"refresh_token"`
-				} `json:"token"`
-			}
-			if err := json.Unmarshal(decoded, &parsed); err == nil {
-				if parsed.Token.AccessToken != "" {
-					token = parsed.Token.AccessToken
-				}
-				if parsed.Token.RefreshToken != "" {
-					refreshToken = parsed.Token.RefreshToken
-				}
-			}
+	cleanToken := strings.TrimPrefix(tokenStr, "go-keyring-base64:")
+	cleanToken = strings.TrimSpace(cleanToken)
+	cleanToken = strings.Trim(cleanToken, "\"'`")
+
+	// Direct refresh token
+	if strings.HasPrefix(cleanToken, "1//") {
+		return "", cleanToken
+	}
+	// Direct access token
+	if strings.HasPrefix(cleanToken, "ya29.") {
+		return cleanToken, ""
+	}
+
+	var jsonBytes []byte
+
+	// Remove all whitespace/newlines/tabs from base64 string
+	noWsToken := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\n' || r == '\r' || r == '\t' {
+			return -1
 		}
-	} else if strings.HasPrefix(token, "{") {
+		return r
+	}, cleanToken)
+
+	// Try base64 standard and URL decoding (with or without padding)
+	if dec, err := base64.StdEncoding.DecodeString(noWsToken); err == nil && len(dec) > 0 {
+		jsonBytes = dec
+	} else if dec, err := base64.RawStdEncoding.DecodeString(noWsToken); err == nil && len(dec) > 0 {
+		jsonBytes = dec
+	} else if dec, err := base64.URLEncoding.DecodeString(noWsToken); err == nil && len(dec) > 0 {
+		jsonBytes = dec
+	} else if dec, err := base64.RawURLEncoding.DecodeString(noWsToken); err == nil && len(dec) > 0 {
+		jsonBytes = dec
+	} else if strings.HasPrefix(cleanToken, "{") {
+		jsonBytes = []byte(cleanToken)
+	}
+
+	if len(jsonBytes) > 0 {
 		var parsed struct {
 			Token struct {
 				AccessToken  string `json:"access_token"`
@@ -777,18 +797,47 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 			AccessToken  string `json:"access_token"`
 			RefreshToken string `json:"refresh_token"`
 		}
-		if err := json.Unmarshal([]byte(token), &parsed); err == nil {
-			if parsed.Token.AccessToken != "" {
-				token = parsed.Token.AccessToken
-			} else if parsed.AccessToken != "" {
-				token = parsed.AccessToken
+		if err := json.Unmarshal(jsonBytes, &parsed); err == nil {
+			at := parsed.Token.AccessToken
+			if at == "" {
+				at = parsed.AccessToken
 			}
-			if parsed.Token.RefreshToken != "" {
-				refreshToken = parsed.Token.RefreshToken
-			} else if parsed.RefreshToken != "" {
-				refreshToken = parsed.RefreshToken
+			rt := parsed.Token.RefreshToken
+			if rt == "" {
+				rt = parsed.RefreshToken
+			}
+			if at != "" || rt != "" {
+				return at, rt
 			}
 		}
+	}
+
+	return cleanToken, ""
+}
+
+func (d *Daemon) pollAntigravityLimits(c Connector) {
+	token := strings.TrimSpace(c.Token)
+	refreshToken := strings.TrimSpace(c.RefreshToken)
+
+	at, rt := parseAntigravityToken(token)
+	if at != "" {
+		token = at
+	}
+	if rt != "" {
+		refreshToken = rt
+	}
+
+	if refreshToken != "" && !strings.HasPrefix(refreshToken, "1//") {
+		_, parsedRt := parseAntigravityToken(refreshToken)
+		if parsedRt != "" {
+			refreshToken = parsedRt
+		}
+	}
+
+	// If token looks like a refresh token (starts with 1//), move it
+	if strings.HasPrefix(token, "1//") && refreshToken == "" {
+		refreshToken = token
+		token = ""
 	}
 
 	if token == "" && refreshToken == "" {
@@ -796,12 +845,6 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 	}
 
 	client := getHTTPClient(10 * time.Second)
-
-	// If token looks like a refresh token (starts with 1//), move it
-	if strings.HasPrefix(token, "1//") && refreshToken == "" {
-		refreshToken = token
-		token = ""
-	}
 
 	// If we have a refresh token and no access token, refresh right away
 	if refreshToken != "" && token == "" {
@@ -822,6 +865,18 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 				}
 				if err := json.NewDecoder(resp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
 					token = tr.AccessToken
+					d.mu.Lock()
+					for idx := range d.settings.Connectors {
+						if d.settings.Connectors[idx].ID == c.ID {
+							d.settings.Connectors[idx].Token = tr.AccessToken
+							d.settings.Connectors[idx].RefreshToken = refreshToken
+							break
+						}
+					}
+					if data, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
+						os.WriteFile(d.cfgPath, data, 0644)
+					}
+					d.mu.Unlock()
 				}
 			}
 		}
@@ -868,6 +923,19 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 					}
 					if err := json.NewDecoder(rResp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
 						token = tr.AccessToken
+						d.mu.Lock()
+						for idx := range d.settings.Connectors {
+							if d.settings.Connectors[idx].ID == c.ID {
+								d.settings.Connectors[idx].Token = tr.AccessToken
+								d.settings.Connectors[idx].RefreshToken = refreshToken
+								break
+							}
+						}
+						if data, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
+							os.WriteFile(d.cfgPath, data, 0644)
+						}
+						d.mu.Unlock()
+
 						req2, _ := http.NewRequest("POST", "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", bytes.NewBuffer([]byte("{}")))
 						req2.Header.Set("Authorization", "Bearer "+token)
 						req2.Header.Set("Content-Type", "application/json")
@@ -1300,6 +1368,20 @@ func (d *Daemon) handlePostConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d.mu.Lock()
+	// Unpack Antigravity token if provided
+	for i := range newCfg.Connectors {
+		newC := &newCfg.Connectors[i]
+		if newC.ID == "antigravity" && newC.Token != "" {
+			at, rt := parseAntigravityToken(newC.Token)
+			if at != "" {
+				newC.Token = at
+			}
+			if rt != "" {
+				newC.RefreshToken = rt
+			}
+		}
+	}
+
 	// Merge secrets from previous settings if not provided
 	for i := range newCfg.Connectors {
 		newC := &newCfg.Connectors[i]
@@ -1522,6 +1604,17 @@ func main() {
 			}
 			if len(userSettings.Connectors) > 0 {
 				settings.Connectors = userSettings.Connectors
+				for i := range settings.Connectors {
+					if settings.Connectors[i].ID == "antigravity" && settings.Connectors[i].Token != "" {
+						at, rt := parseAntigravityToken(settings.Connectors[i].Token)
+						if at != "" {
+							settings.Connectors[i].Token = at
+						}
+						if rt != "" {
+							settings.Connectors[i].RefreshToken = rt
+						}
+					}
+				}
 			}
 			if userSettings.DeviceName != "" {
 				settings.DeviceName = userSettings.DeviceName
