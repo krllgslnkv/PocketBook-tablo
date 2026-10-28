@@ -1096,37 +1096,43 @@ function drawPreview() {
 
 function renderAntigravityCard() {
   var c = conn('antigravity');
+  var val = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
   return '<div class="source-card" id="source-card-antigravity"><h3>' + t('card.antigravity.title') + '</h3>' + statusLineHtml('antigravity') +
-    '<label>' + t('field.token') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set || c.refresh_token_set) + '" data-conn-field="token" data-conn-id="antigravity"></label>' +
+    '<label>' + t('field.token') + '<input type="password"' + val + ' placeholder="' + tokenPlaceholder(c.token_set || c.refresh_token_set) + '" data-conn-field="token" data-conn-id="antigravity"></label>' +
     '<p class="hint">' + t('card.antigravity.hint') + '</p>' +
     '</div>';
 }
 
 function renderClaudeCard() {
   var c = conn('claude');
+  var valToken = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
+  var valRefresh = c.refresh_token ? ' value="' + escapeAttr(c.refresh_token) + '"' : '';
   return '<div class="source-card" id="source-card-claude"><h3>' + t('card.claude.title') + '</h3>' + statusLineHtml('claude') +
-    '<label>' + t('field.accessToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="claude"></label>' +
-    '<label>' + t('field.refreshToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="claude"></label>' +
+    '<label>' + t('field.accessToken') + '<input type="password"' + valToken + ' placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="claude"></label>' +
+    '<label>' + t('field.refreshToken') + '<input type="password"' + valRefresh + ' placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="claude"></label>' +
     '<p class="hint">' + t('card.claude.hint') + '</p>' +
     '</div>';
 }
 
 function renderCodexCard() {
   var c = conn('codex');
+  var valToken = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
+  var valRefresh = c.refresh_token ? ' value="' + escapeAttr(c.refresh_token) + '"' : '';
   return '<div class="source-card" id="source-card-codex"><h3>' + t('card.codex.title') + '</h3>' + statusLineHtml('codex') +
-    '<label>' + t('field.accessToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
-    '<label>' + t('field.refreshToken') + '<input type="password" placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="codex"></label>' +
+    '<label>' + t('field.accessToken') + '<input type="password"' + valToken + ' placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="codex"></label>' +
+    '<label>' + t('field.refreshToken') + '<input type="password"' + valRefresh + ' placeholder="' + tokenPlaceholder(c.refresh_token_set) + '" data-conn-field="refresh_token" data-conn-id="codex"></label>' +
     '<p class="hint">' + t('card.codex.hint') + '</p>' +
     '</div>';
 }
 
 function renderMailCard() {
   var c = conn('mail');
+  var valPass = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
   return '<div class="source-card" id="source-card-mail"><h3>' + t('card.mail.title') + '</h3>' + statusLineHtml('mail') +
-    '<label>' + t('mail.server') + '<input type="text" value="' + escapeAttr(c.url) + '" placeholder="imap.gmail.com" data-conn-field="url" data-conn-id="mail"></label>' +
+    '<label>' + t('mail.server') + '<input type="text" value="' + escapeAttr(c.url || 'imap.gmail.com') + '" placeholder="imap.gmail.com" data-conn-field="url" data-conn-id="mail"></label>' +
     '<p class="warning" id="hint-changed-mail" hidden>' + t('mail.changed') + '</p>' +
-    '<label>' + t('mail.address') + '<input type="text" placeholder="' + tokenPlaceholder(c.username_set) + '" data-conn-field="username" data-conn-id="mail"></label>' +
-    '<label>' + t('mail.password') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="mail"></label>' +
+    '<label>' + t('mail.address') + '<input type="text" value="' + escapeAttr(c.username || '') + '" placeholder="' + (c.username_set ? tokenPlaceholder(true) : 'user@gmail.com') + '" data-conn-field="username" data-conn-id="mail"></label>' +
+    '<label>' + t('mail.password') + '<input type="password"' + valPass + ' placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="mail"></label>' +
     '<p class="hint">' + t('mail.hint') + '</p>' +
     '</div>';
 }
@@ -1141,10 +1147,11 @@ function sensorSlotOptionsHtml() {
 
 function renderHomeCard() {
   var c = conn('home');
+  var valToken = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
   var html = '<div class="source-card" id="source-card-home"><h3>' + t('card.home.title') + '</h3>' + statusLineHtml('home') +
     '<label>' + t('field.url') + '<input type="text" value="' + escapeAttr(c.url) + '" placeholder="http://192.168.1.2:8123" data-conn-field="url" data-conn-id="home"></label>' +
     '<p class="warning" id="hint-changed-home" hidden>' + t('hint.changed.token') + '</p>' +
-    '<label>' + t('field.token') + '<input type="password" placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="home"></label>' +
+    '<label>' + t('field.token') + '<input type="password"' + valToken + ' placeholder="' + tokenPlaceholder(c.token_set) + '" data-conn-field="token" data-conn-id="home"></label>' +
     '<p class="hint">' + t('home.hint') + '</p>' +
     '<div class="checkbox-row"><input type="checkbox" data-conn-field="insecure" data-conn-id="home"' + (c.insecure ? ' checked' : '') + '>' +
     '<span>' + t('field.insecure') + '<br><span class="warning">' + t('home.insecure.warn') + '</span></span></div>' +
@@ -1212,7 +1219,47 @@ function renderCustomConnectors() {
   return html;
 }
 
+function syncInputsToState() {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-conn-field]'), function (inp) {
+    var cid = inp.dataset.connId;
+    var field = inp.dataset.connField;
+    var c = conn(cid);
+    if (!c) return;
+    if (field === 'interval') {
+      c.interval = Number(inp.value) || 300;
+    } else if (field === 'insecure') {
+      c.insecure = inp.checked;
+    } else if (field === 'url') {
+      var u = (inp.value || '').trim();
+      u = u.replace(/^(https?:\/\/)+(https?:\/\/)?/i, function (m) {
+        return m.toLowerCase().indexOf('https') !== -1 ? 'https://' : 'http://';
+      });
+      c.url = u;
+    } else if (inp.value !== '') {
+      c[field] = inp.value;
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-sensor-field]'), function (inp) {
+    var idx = Number(inp.dataset.sensorIdx);
+    var home = conn('home');
+    if (home && home.map && home.map[idx]) {
+      home.map[idx].source = (inp.value || '').trim();
+    }
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-map-field]'), function (inp) {
+    var cid = inp.dataset.connId;
+    var idx = Number(inp.dataset.mapIdx);
+    var c = conn(cid);
+    if (c && c.map && c.map[idx]) {
+      c.map[idx][inp.dataset.mapField] = inp.value;
+    }
+  });
+}
+
 function renderSources() {
+  syncInputsToState();
   el('sources-list').innerHTML = renderAntigravityCard() + renderClaudeCard() + renderCodexCard() + renderMailCard() +
     renderHomeCard() + renderRatesCard() + renderWeatherCard();
   el('custom-connectors').innerHTML = renderCustomConnectors();
@@ -1531,7 +1578,12 @@ function handleFieldChange(e) {
     var field = tgt.dataset.connField;
     if (field === 'interval') c.interval = Number(tgt.value) || 300;
     else if (field === 'insecure') c.insecure = tgt.checked;
-    else c[field] = tgt.value;
+    else if (field === 'url') {
+      tgt.value = tgt.value.replace(/^(https?:\/\/)+(https?:\/\/)?/i, function (m) {
+        return m.toLowerCase().indexOf('https') !== -1 ? 'https://' : 'http://';
+      });
+      c.url = tgt.value;
+    } else c[field] = tgt.value;
     if (field === 'url' || field === 'insecure') updateChangedHint(tgt.dataset.connId);
     return;
   }
@@ -1600,6 +1652,7 @@ function save() {
     setStatus(t('status.notLoaded'));
     return;
   }
+  syncInputsToState();
   var payload = {
     device_name: el('device-name').value || 'tablo-setup',
     timezone_minutes: state.timezone_minutes,
