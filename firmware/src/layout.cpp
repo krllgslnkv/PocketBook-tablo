@@ -649,17 +649,16 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
 
         if (is_ru) {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Подключите PocketBook к сети Wi-Fi в настройках читалки.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 26);
+                      "Подключите PocketBook к Wi-Fi в настройках читалки.", Color::Black, 1, false);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "После подключения адрес настройки и QR-код появятся автоматически.",
-                      Color::Black, 1, false);
+                      "Здесь появится адрес и QR-код для настройки.", Color::Black, 1, false);
         } else {
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
                       "Connect PocketBook to Wi-Fi in device settings.", Color::Black, 1, false);
-            y = static_cast<int16_t>(y + 26);
+            y = static_cast<int16_t>(y + 24);
             draw_text(canvas, fonts::Terminus14, MARGIN, y,
-                      "Once connected, setup URL and QR code will appear automatically.", Color::Black, 1, false);
+                      "Setup URL and QR code will appear here.", Color::Black, 1, false);
         }
     }
 }
