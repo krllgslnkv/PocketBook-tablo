@@ -62,6 +62,7 @@ enum class Str : uint8_t {
     kTokenRefreshPostponed,
     kTokenNoRefresh,
     kTokenRefreshFailed,
+    kRefreshTokenExpired,  // сервер ответил invalid_grant: нужен новый вход
     kMailNoAnswer,
     kNoMessage,
     kImapNoTls,
