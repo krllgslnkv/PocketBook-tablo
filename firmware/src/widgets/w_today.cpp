@@ -4,8 +4,11 @@
 #include <cstdio>
 
 #include "../assets/plexmono_14.h"
+#include "../assets/plexmono_16.h"
 #include "../assets/plexmono_28.h"
+#include "../assets/plexmono_41.h"
 #include "../assets/terminus_14.h"
+#include "../assets/terminus_16.h"
 #include "prims.h"
 #include "../i18n.h"
 
@@ -46,22 +49,21 @@ void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const 
         return;
     }
     prims::draw_eyebrow(c, r, i18n::tr(i18n::Str::kToday));
-    int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 34);
+    int16_t y = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 42);
 
     const Slot* temp = store.find("weather.temp");
     if (layout::has_data(temp)) {
         char buf[8];
         std::snprintf(buf, sizeof(buf), "%+d°", static_cast<int>(temp->number));
-        draw_text(c, fonts::PlexMono28, r.x, y, buf, Color::Black);
-        int16_t tw = text_width(fonts::PlexMono28, buf);
+        draw_text(c, fonts::PlexMono41, r.x, y, buf, Color::Black);
+        y = static_cast<int16_t>(y + 26);
+
         const Slot* summary = store.find("weather.summary");
         if (layout::has_data(summary)) {
-            int16_t summary_w = static_cast<int16_t>(r.w - tw - 10);
-            String label = prims::truncate_to_width(fonts::Terminus14, summary->text.c_str(), summary_w);
-            draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + tw + 10), y, label.c_str(),
-                      Color::Black, 1, /*bold=*/true);
+            String label = prims::truncate_to_width(fonts::Terminus16, summary->text.c_str(), r.w);
+            draw_text(c, fonts::Terminus16, r.x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
         }
-        y = static_cast<int16_t>(y + 26);
+        y = static_cast<int16_t>(y + 30);
     }
 
     for (int i = 1; i <= 3; ++i) {
@@ -74,14 +76,13 @@ void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const 
         if (y > r.y + r.h) break;
 
         if (layout::has_data(at)) {
-            // 14px — .num времени события в cockpit.html (`ev.at_label`).
-            draw_text(c, fonts::PlexMono14, r.x, y, at->text.c_str(), Color::Black);
+            draw_text(c, fonts::PlexMono16, r.x, y, at->text.c_str(), Color::Black);
         }
-        String label = prims::truncate_to_width(fonts::Terminus14, title->text.c_str(),
-                                                 static_cast<int16_t>(r.w - 56));
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + 56), y, label.c_str(),
+        String label = prims::truncate_to_width(fonts::Terminus16, title->text.c_str(),
+                                                 static_cast<int16_t>(r.w - 60));
+        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + 60), y, label.c_str(),
                   Color::Black, 1, /*bold=*/true);
-        y = static_cast<int16_t>(y + 20);
+        y = static_cast<int16_t>(y + 24);
     }
 }
 

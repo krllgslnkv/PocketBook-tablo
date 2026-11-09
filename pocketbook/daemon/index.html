@@ -275,6 +275,10 @@
 <footer>
   <button type="button" id="save-btn" data-i18n="save" disabled>Save</button>
   <button type="button" class="secondary" id="reboot-btn" data-i18n="reboot">Reboot</button>
+  <label class="button secondary" style="cursor:pointer;display:inline-block;padding:8px 14px;border:1px solid #ccc;border-radius:4px;margin-left:8px;font-size:14px;vertical-align:middle;background:#f8f9fa;">
+    <span data-i18n="ota.btn">Update via Wi-Fi</span>
+    <input type="file" id="ota-file-input" accept=".tar.gz,.tgz" style="display:none">
+  </label>
   <p class="setup-url-footer" style="margin-top:14px;color:#888;font-size:13px;text-align:center;">http://pbtablo-setup.local:8080</p>
 </footer>
 
@@ -312,6 +316,7 @@ var I18N = {
     'device.name': 'Device name',
     'device.lang': 'Language',
     'hint.device.url': 'The page is available at http://{0}.local:8080 from the same network',
+    'hint.device.url.with_ip': 'The page is available at http://{0}.local:8080 (or http://{1}:8080) from the same network',
     'hint.city.pending': 'Coordinates will be resolved once connected to a network',
     'hint.city.coords': 'Coordinates: {0}, {1}',
     'token.set': 'Set · leave empty to keep',
@@ -325,6 +330,9 @@ var I18N = {
     'status.saveFailed': 'Couldn\'t save: {0}',
     'status.rebooting': 'Rebooting…',
     'reboot.confirm': 'Reboot the device?',
+    'ota.btn': 'Update via Wi-Fi',
+    'ota.uploading': 'Uploading update…',
+    'ota.restarting': 'Update installed! Restarting…',
     'slot.btc': 'BTC rate',
     'slot.usd_rub': 'US dollar',
     'slot.eur_rub': 'Euro',
@@ -433,6 +441,7 @@ var I18N = {
     'device.name': 'Имя устройства',
     'device.lang': 'Язык',
     'hint.device.url': 'страница доступна как http://{0}.local:8080 из той же сети',
+    'hint.device.url.with_ip': 'страница доступна как http://{0}.local:8080 (или http://{1}:8080) из той же сети',
     'hint.city.pending': 'координаты определятся при подключении к сети',
     'hint.city.coords': 'координаты: {0}, {1}',
     'token.set': 'задан · оставьте пустым, чтобы не менять',
@@ -446,6 +455,9 @@ var I18N = {
     'status.saveFailed': 'не сохранилось: {0}',
     'status.rebooting': 'перезагружаем…',
     'reboot.confirm': 'Перезагрузить устройство?',
+    'ota.btn': 'Обновить по Wi-Fi',
+    'ota.uploading': 'Загружаем обновление…',
+    'ota.restarting': 'Обновление установлено! Перезапуск…',
     'slot.btc': 'Курс BTC',
     'slot.usd_rub': 'Доллар',
     'slot.eur_rub': 'Евро',
@@ -668,6 +680,14 @@ function slotSourceCard(slot) {
   if (slot.indexOf('limit.codex') === 0) return 'codex';
   if (slot.indexOf('mail.') === 0) return 'mail';
   if (slot === 'co2' || slot === 'tvoc') return 'home';
+  for (var j = 0; j < (state.connectors || []).length; j++) {
+    var c = state.connectors[j];
+    if (c.map) {
+      for (var k = 0; k < c.map.length; k++) {
+        if (c.map[k].slot === slot) return c.id;
+      }
+    }
+  }
   if (slot === 'btc' || slot === 'usd_rub' || slot === 'eur_rub') return 'rates';
   if (slot.indexOf('weather.') === 0) return 'weather';
   return null;
@@ -696,6 +716,20 @@ function computeSourceCardStatus(card) {
     if (s && s.error) return { error: true, text: s.error };
   }
   var fs = slotInfo(card.firstSlot);
+  if (!fs && card.key === 'home') {
+    var checkSlots = ['co2', 'tvoc', 'temp', 'hum', 'Температура', 'Влажность'];
+    for (var j = 0; j < state.connectors.length; j++) {
+      if (state.connectors[j].id === 'home' && state.connectors[j].map) {
+        for (var k = 0; k < state.connectors[j].map.length; k++) {
+          checkSlots.push(state.connectors[j].map[k].slot);
+        }
+      }
+    }
+    for (var m = 0; m < checkSlots.length; m++) {
+      var ms = slotInfo(checkSlots[m]);
+      if (ms) { fs = ms; break; }
+    }
+  }
   if (!fs) return { error: false, text: t('status.none') };
   var mins = Math.max(0, Math.round((fs.age || 0) / 60));
   return { error: false, text: t('status.updated', mins) };
@@ -754,12 +788,17 @@ function updateCityHint() {
 function updateDeviceNameHint(name) {
   var devName = name || 'pbtablo-setup';
   var hintEl = document.getElementById('device-name-hint');
+  var ip = (state.status && state.status.ip) ? state.status.ip : (window.location.hostname.match(/^\d+\.\d+\.\d+\.\d+$/) ? window.location.hostname : '');
   if (hintEl) {
-    hintEl.textContent = t('hint.device.url', devName);
+    if (ip) {
+      hintEl.textContent = t('hint.device.url.with_ip', devName, ip);
+    } else {
+      hintEl.textContent = t('hint.device.url', devName);
+    }
   }
   var footerEl = document.querySelector('.setup-url-footer');
   if (footerEl) {
-    footerEl.textContent = 'http://' + devName + '.local:8080';
+    footerEl.textContent = 'http://' + devName + '.local:8080' + (ip ? ' · http://' + ip + ':8080' : '');
   }
 }
 
@@ -782,10 +821,34 @@ function sizeOptionsHtml(minWidth, current) {
   }).join('');
 }
 
+function allAvailableSlots() {
+  var list = SLOTS.slice();
+  var seen = {};
+  list.forEach(function (s) { seen[s] = true; });
+  (state.connectors || []).forEach(function (c) {
+    (c.map || []).forEach(function (m) {
+      if (m.slot && !seen[m.slot]) {
+        seen[m.slot] = true;
+        list.push(m.slot);
+      }
+    });
+  });
+  if (state.status && state.status.slots) {
+    Object.keys(state.status.slots).forEach(function (s) {
+      if (!seen[s] && s.indexOf('.') === -1 && s.indexOf(':') === -1) {
+        seen[s] = true;
+        list.push(s);
+      }
+    });
+  }
+  return list;
+}
+
 function slotOptionsHtml(current) {
   var html = '<option value="">' + t('slot.placeholder') + '</option>';
-  SLOTS.forEach(function (s) {
-    html += '<option value="' + s + '"' + (s === current ? ' selected' : '') + '>' + escapeHtml(t('slot.' + s)) + '</option>';
+  allAvailableSlots().forEach(function (s) {
+    var label = (I18N[state.lang] && I18N[state.lang]['slot.' + s]) || (I18N.en && I18N.en['slot.' + s]) || s;
+    html += '<option value="' + escapeAttr(s) + '"' + (s === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
   });
   return html;
 }
@@ -1575,6 +1638,33 @@ document.addEventListener('click', function (e) {
   if (tgt.id === 'reboot-btn') reboot();
 });
 
+document.addEventListener('change', function(e) {
+  if (e.target && e.target.id === 'ota-file-input') {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!confirm(t('ota.btn') + ' (' + file.name + ')?')) {
+      e.target.value = '';
+      return;
+    }
+    setStatus(t('ota.uploading'));
+    var fd = new FormData();
+    fd.append('file', file);
+    fetch('/api/update', { method: 'POST', body: fd })
+      .then(function(r) { return r.json(); })
+      .then(function(res) {
+        if (res.ok) {
+          setStatus(t('ota.restarting'));
+          setTimeout(function() { location.reload(); }, 6000);
+        } else {
+          setStatus('Error: ' + (res.message || 'Update failed'));
+        }
+      })
+      .catch(function(err) {
+        setStatus('Update failed: ' + err.message);
+      });
+  }
+});
+
 function handleFieldChange(e) {
   var tgt = e.target;
   if (!tgt.dataset) return;
@@ -1661,7 +1751,7 @@ function save() {
   }
   syncInputsToState();
   var payload = {
-    device_name: el('device-name').value || 'tablo-setup',
+    device_name: el('device-name').value || 'pbtablo-setup',
     timezone_minutes: state.timezone_minutes,
     city: state.city,
     lang: state.lang,

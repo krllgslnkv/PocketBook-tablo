@@ -18,7 +18,7 @@ using slots::Store;
 const char* const kLimitsAirSlots[] = {
     "limit.claude.5h", "limit.claude.week", "limit.claude.reset", "limit.codex",
     "limit.codex.reset", "limit.antigravity.5h", "limit.antigravity.week", "limit.antigravity.reset",
-    "co2",              "tvoc",               nullptr,
+    "co2", "tvoc", "temp", "temperature", "Температура", "hum", "humidity", "Влажность", nullptr,
 };
 
 bool limits_air_visible(const Store& store, const Instance&) {
@@ -33,7 +33,10 @@ bool limits_air_visible(const Store& store, const Instance&) {
            prims::has_failure_reason(store, "codex.status") ||
            prims::has_failure_reason(store, "antigravity.status") ||
            prims::has_failure_reason(store, "home.status") || layout::has_data(store.find("co2")) ||
-           layout::has_data(store.find("tvoc"));
+           layout::has_data(store.find("tvoc")) || layout::has_data(store.find("temp")) ||
+           layout::has_data(store.find("temperature")) || layout::has_data(store.find("Температура")) ||
+           layout::has_data(store.find("hum")) || layout::has_data(store.find("humidity")) ||
+           layout::has_data(store.find("Влажность"));
 }
 
 void limits_air_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, const Instance&) {

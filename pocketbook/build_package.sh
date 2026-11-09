@@ -38,7 +38,7 @@ cp "$ROOT/pocketbook/tablo_render_arm" "$DIST/applications/.tablo/bin/tablo_rend
 cp "$ROOT/pocketbook/tablo_daemon_arm" "$DIST/applications/.tablo/bin/tablo_daemon"
 chmod +x "$DIST/applications/.tablo/bin/"*
 
-cp "$ROOT/firmware/data/index.html" "$DIST/applications/.tablo/data/index.html"
+cp "$ROOT/pocketbook/daemon/index.html" "$DIST/applications/.tablo/data/index.html"
 cp "$ROOT/pocketbook/default_config.json" "$DIST/applications/.tablo/config.json"
 cp "$ROOT/pocketbook/default_config.json" "$DIST/tablo_config.json"
 
@@ -80,13 +80,19 @@ fi
 # 2. Stop any existing background daemon before starting fresh
 killall -9 tablo_daemon 2>/dev/null || true
 
-# 3. Ensure Wi-Fi network connection
+# 3. Ensure Wi-Fi network connection and disable Wi-Fi power saving
+if [ -x /ebrmain/bin/netagent ]; then
+    /ebrmain/bin/netagent wifi on >> "$LOG" 2>&1
+    /ebrmain/bin/netagent net on >> "$LOG" 2>&1
+    /ebrmain/bin/netagent connect >> "$LOG" 2>&1
+fi
 if [ -x /ebrmain/bin/netconnect ]; then
     /ebrmain/bin/netconnect >> "$LOG" 2>&1
 fi
+iwconfig wlan0 power off 2>/dev/null || true
 
 # 4. Start autonomous background daemon with Web Setup Portal on port 8080
-"$TABLO_DIR/bin/tablo_daemon" \
+nohup "$TABLO_DIR/bin/tablo_daemon" \
     -port 8080 \
     -config "$CONFIG" \
     -html "$TABLO_DIR/data/index.html" \
@@ -103,6 +109,9 @@ fi
 EOF
 
 chmod +x "$DIST/applications/Tablo.app"
+
+echo "==> 6. Creating update.tar.gz for Over-The-Air (Wi-Fi) updates..."
+(cd "$DIST" && tar -czf update.tar.gz -C "$DIST/applications" Tablo.app -C "$DIST/applications/.tablo" bin data)
 
 echo "==> Packaging complete! Package structure:"
 ls -lhR "$DIST"

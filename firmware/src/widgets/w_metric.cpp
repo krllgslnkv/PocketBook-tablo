@@ -6,7 +6,9 @@
 #include "widget.h"
 
 #include "../assets/plexmono_28.h"
+#include "../assets/plexmono_41.h"
 #include "../assets/terminus_14.h"
+#include "../assets/terminus_16.h"
 #include "prims.h"
 
 namespace widgets {
@@ -34,18 +36,18 @@ void metric_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r,
     prims::draw_eyebrow(c, r, label);
 
     const Slot* s = store.find(instance.slot);
-    int16_t baseline = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 34);
+    int16_t baseline = static_cast<int16_t>(r.y + prims::kEyebrowTextOffset + 42);
 
     if (layout::has_data(s) && s->delta != 0.0f) {
         String delta = prims::format_delta(s->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw),
+        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
+        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - dw),
                   static_cast<int16_t>(r.y + prims::kEyebrowTextOffset), delta.c_str(),
                   Color::Black, 1, /*bold=*/true);
     }
 
     String value = layout::format_value(s, d.now, 0, "");
-    draw_text(c, fonts::PlexMono28, r.x, baseline, value.c_str(), Color::Black);
+    draw_text(c, fonts::PlexMono41, r.x, baseline, value.c_str(), Color::Black);
 
     if (layout::has_data(s) && s->history_len >= 2) {
         int16_t spark_top = static_cast<int16_t>(baseline + 12);

@@ -4,8 +4,11 @@
 #include "widget.h"
 
 #include "../assets/plexmono_25.h"
+#include "../assets/plexmono_28.h"
 #include "../assets/plexmono_41.h"
 #include "../assets/terminus_14.h"
+#include "../assets/terminus_16.h"
+#include "../assets/terminus_20.h"
 #include "prims.h"
 #include "../i18n.h"
 
@@ -55,19 +58,19 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
     const Slot* eur_rub = store.find("eur_rub");
 
     if (layout::has_data(btc)) {
-        int16_t label_baseline = static_cast<int16_t>(y + 22);
-        draw_text(c, fonts::Terminus14, r.x, label_baseline, "BTC / USD", Color::Black, 1, /*bold=*/true);
+        int16_t label_baseline = static_cast<int16_t>(y + 24);
+        draw_text(c, fonts::Terminus20, r.x, label_baseline, "BTC / USD", Color::Black, 1, /*bold=*/true);
 
         String delta = prims::format_delta(btc->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
+        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
+        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
                   delta.c_str(), Color::Black, 1, /*bold=*/true);
         const char* period = i18n::tr(i18n::Str::kLast24h);
-        int16_t pw = text_width(fonts::Terminus14, period);
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - pw),
-                  static_cast<int16_t>(label_baseline + 18), period, Color::Black, 1, /*bold=*/true);
+        int16_t pw = text_width(fonts::Terminus16, period);
+        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - pw),
+                  static_cast<int16_t>(label_baseline + 20), period, Color::Black, 1, /*bold=*/true);
 
-        int16_t number_baseline = static_cast<int16_t>(label_baseline + 41);
+        int16_t number_baseline = static_cast<int16_t>(label_baseline + 44);
         String value = layout::format_value(btc, d.now, 0, "");
         draw_text(c, fonts::PlexMono41, r.x, number_baseline, value.c_str(), Color::Black);
 
@@ -91,18 +94,18 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
     for (const Pair& p : pairs) {
         if (!layout::has_data(p.slot)) continue;
 
-        draw_text(c, fonts::Terminus14, r.x, y, p.label, Color::Black, 1, /*bold=*/true);
+        draw_text(c, fonts::Terminus20, r.x, y, p.label, Color::Black, 1, /*bold=*/true);
 
         String delta = prims::format_delta(p.slot->delta);
-        int16_t dw = text_width(fonts::Terminus14, delta.c_str());
-        draw_text(c, fonts::Terminus14, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
+        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
+        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
                   Color::Black, 1, /*bold=*/true);
 
         String val = layout::format_value(p.slot, d.now, 2, "");
-        int16_t vw = text_width(fonts::PlexMono25, val.c_str());
-        draw_text(c, fonts::PlexMono25, static_cast<int16_t>(r.x + r.w - dw - vw - 10), y,
+        int16_t vw = text_width(fonts::PlexMono28, val.c_str());
+        draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - dw - vw - 12), y,
                   val.c_str(), Color::Black);
-        y = static_cast<int16_t>(y + 36);
+        y = static_cast<int16_t>(y + 38);
     }
 }
 

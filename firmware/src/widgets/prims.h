@@ -66,7 +66,7 @@ bool tvoc_quiet(float v);
 // TVOC (widgets/w_air.cpp).
 void draw_air_metric(canvas::Canvas& c, layout::Rect area, const char* label, const char* unit,
                      const slots::Slot* s, uint32_t now, bool (*is_alarm)(float),
-                     bool (*is_quiet)(float));
+                     bool (*is_quiet)(float), int decimals = 0);
 
 // Лимиты + воздух одной колонкой — draw_limits_and_air предшественника.
 // show_limits/show_air гасят свою половину независимо от того, есть ли для

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
+	"compress/gzip"
 	"crypto/tls"
 	_ "embed"
 	"encoding/base64"
@@ -13,16 +15,21 @@ import (
 	"io"
 	"log"
 	"math"
+	"mime"
 	"net"
 	"net/http"
+	"net/mail"
 	"net/textproto"
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -147,7 +154,78 @@ type Daemon struct {
 	failed       map[string]string
 	lastPolled   map[string]time.Time
 	lastIP       string
+	timeOffset   int64
+	timeSynced   int32
 	forceRedraw  bool
+}
+
+func (d *Daemon) now() uint32 {
+	offset := atomic.LoadInt64(&d.timeOffset)
+	return uint32(time.Now().Unix() + offset)
+}
+
+func (d *Daemon) syncTime() {
+	unix, err := getNTPTime()
+	if err != nil {
+		unix, err = getHTTPTime()
+	}
+	if err == nil && unix > 1700000000 {
+		offset := unix - time.Now().Unix()
+		atomic.StoreInt64(&d.timeOffset, offset)
+		atomic.StoreInt32(&d.timeSynced, 1)
+		log.Printf("Time synchronized: UTC is %s, offset from system: %ds", time.Unix(unix, 0).UTC().Format(time.RFC3339), offset)
+	} else if err != nil {
+		log.Printf("Time sync warning: %v", err)
+	}
+}
+
+func getNTPTime() (int64, error) {
+	servers := []string{"pool.ntp.org:123", "time.google.com:123", "time.cloudflare.com:123"}
+	for _, srv := range servers {
+		conn, err := net.DialTimeout("udp", srv, 2*time.Second)
+		if err != nil {
+			continue
+		}
+		conn.SetDeadline(time.Now().Add(2 * time.Second))
+		req := make([]byte, 48)
+		req[0] = 0x1B // LI=0, VN=3, Mode=3 (client)
+		if _, err := conn.Write(req); err != nil {
+			conn.Close()
+			continue
+		}
+		resp := make([]byte, 48)
+		if _, err := conn.Read(resp); err != nil {
+			conn.Close()
+			continue
+		}
+		conn.Close()
+		secs := binary.BigEndian.Uint32(resp[40:44])
+		if secs > 2208988800 {
+			return int64(secs) - 2208988800, nil
+		}
+	}
+	return 0, fmt.Errorf("all ntp servers failed")
+}
+
+func getHTTPTime() (int64, error) {
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Head("https://www.google.com")
+	if err != nil {
+		resp, err = client.Head("https://api.open-meteo.com")
+		if err != nil {
+			return 0, err
+		}
+	}
+	defer resp.Body.Close()
+	dateStr := resp.Header.Get("Date")
+	if dateStr == "" {
+		return 0, fmt.Errorf("no Date header")
+	}
+	t, err := http.ParseTime(dateStr)
+	if err != nil {
+		return 0, err
+	}
+	return t.Unix(), nil
 }
 
 func formatNumber(val float64) string {
@@ -423,7 +501,7 @@ func (d *Daemon) pollBinanceTicker(c Connector) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
 
 	sl := d.slots["btc"]
 	sl.Number = price
@@ -508,7 +586,7 @@ func (d *Daemon) pollFiatRates(c Connector) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
 
 	if usd, ok := data.Valute["USD"]; ok && usd.Previous > 0 {
 		delta := (usd.Value - usd.Previous) / usd.Previous * 100
@@ -536,11 +614,118 @@ func (d *Daemon) pollFiatRates(c Connector) {
 	}
 }
 
-func (d *Daemon) pollWeather(c Connector) {
+func wmoToText(code int, lang string) string {
+	isRu := lang == "ru"
+	switch {
+	case code == 0:
+		if isRu {
+			return "ЯСНО"
+		}
+		return "CLEAR"
+	case code == 1 || code == 3:
+		if isRu {
+			return "ОБЛАЧНО"
+		}
+		return "CLOUDY"
+	case code == 2:
+		if isRu {
+			return "ПЕР. ОБЛ."
+		}
+		return "PARTLY CLOUDY"
+	case code == 45 || code == 48:
+		if isRu {
+			return "ТУМАН"
+		}
+		return "FOG"
+	case (code >= 51 && code <= 67) || (code >= 80 && code <= 82):
+		if isRu {
+			return "ДОЖДЬ"
+		}
+		return "RAIN"
+	case (code >= 71 && code <= 77) || code == 85 || code == 86:
+		if isRu {
+			return "СНЕГ"
+		}
+		return "SNOW"
+	case code >= 95 && code <= 99:
+		if isRu {
+			return "ГРОЗА"
+		}
+		return "STORM"
+	default:
+		if isRu {
+			return "ОБЛАЧНО"
+		}
+		return "CLOUDY"
+	}
+}
+
+func (d *Daemon) pollGeocode(c Connector) {
+	d.mu.Lock()
+	city := strings.TrimSpace(d.settings.City)
+	resolved := d.settings.CityResolved
 	lat := d.settings.CityLat
 	lon := d.settings.CityLon
+	d.mu.Unlock()
+
+	if city == "" || (city == resolved && (lat != 0 || lon != 0)) {
+		return
+	}
+
+	url := fmt.Sprintf("https://geocoding-api.open-meteo.com/v1/search?name=%s&count=1&language=ru&format=json", url.QueryEscape(city))
+	client := getHTTPClient(5 * time.Second)
+	resp, err := client.Get(url)
+	if err != nil {
+		log.Printf("Geocode error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var res struct {
+		Results []struct {
+			Name      string  `json:"name"`
+			Latitude  float64 `json:"latitude"`
+			Longitude float64 `json:"longitude"`
+		} `json:"results"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil || len(res.Results) == 0 {
+		log.Printf("Geocode: no results for city %q", city)
+		return
+	}
+
+	r0 := res.Results[0]
+	d.mu.Lock()
+	d.settings.CityLat = r0.Latitude
+	d.settings.CityLon = r0.Longitude
+	d.settings.CityResolved = city
+	if cfgData, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
+		os.WriteFile(d.cfgPath, cfgData, 0644)
+	}
+	d.mu.Unlock()
+	log.Printf("Geocoded city %q -> lat=%.4f, lon=%.4f", city, r0.Latitude, r0.Longitude)
+
+	// Trigger immediate weather update for new coordinates
+	d.mu.Lock()
+	conns := d.settings.Connectors
+	d.mu.Unlock()
+	for _, conn := range conns {
+		if conn.Kind == "weather" {
+			go d.pollWeather(conn)
+			break
+		}
+	}
+}
+
+func (d *Daemon) pollWeather(c Connector) {
+	d.mu.Lock()
+	lat := d.settings.CityLat
+	lon := d.settings.CityLon
+	d.mu.Unlock()
 	if lat == 0 && lon == 0 {
-		lat = 56.8389  // default fallback if city not geocoded yet
+		lat = 56.8389 // default fallback if city not geocoded yet
 		lon = 60.6057
 	}
 	url := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto", lat, lon)
@@ -563,7 +748,8 @@ func (d *Daemon) pollWeather(c Connector) {
 	}
 
 	var data struct {
-		Current struct {
+		UtcOffsetSeconds int `json:"utc_offset_seconds"`
+		Current          struct {
 			Temperature2m float64 `json:"temperature_2m"`
 			WeatherCode   int     `json:"weather_code"`
 		} `json:"current"`
@@ -579,16 +765,21 @@ func (d *Daemon) pollWeather(c Connector) {
 		return
 	}
 
-	weatherNames := map[int]string{
-		0: "CLEAR", 1: "MAINLY CLEAR", 2: "PARTLY CLOUDY", 3: "OVERCAST",
-		45: "FOG", 48: "DEPOSITING RIME FOG", 51: "LIGHT DRIZZLE", 53: "DRIZZLE",
-		55: "HEAVY DRIZZLE", 61: "SLIGHT RAIN", 63: "RAIN", 65: "HEAVY RAIN",
-		71: "SLIGHT SNOW", 73: "SNOW", 75: "HEAVY SNOW", 80: "SHOWERS", 95: "THUNDERSTORM",
+	d.mu.Lock()
+	lang := d.settings.Lang
+	if data.UtcOffsetSeconds != 0 {
+		newTz := data.UtcOffsetSeconds / 60
+		if newTz != d.settings.TimezoneMinutes {
+			d.settings.TimezoneMinutes = newTz
+			if cfgData, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
+				os.WriteFile(d.cfgPath, cfgData, 0644)
+			}
+			log.Printf("Updated timezone from weather API: %d min (%+d hours)", newTz, newTz/60)
+		}
 	}
-	cond := "CLOUDY"
-	if name, ok := weatherNames[data.Current.WeatherCode]; ok {
-		cond = name
-	}
+	d.mu.Unlock()
+
+	cond := wmoToText(data.Current.WeatherCode, lang)
 
 	minT := 0.0
 	maxT := 0.0
@@ -605,7 +796,7 @@ func (d *Daemon) pollWeather(c Connector) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
 
 	d.slots["weather.temp"] = Slot{
 		Number:    temp,
@@ -624,6 +815,22 @@ func (d *Daemon) pollWeather(c Connector) {
 	}
 }
 
+func decimateFloats(raw []float64, target int) []float64 {
+	if len(raw) <= target {
+		return raw
+	}
+	res := make([]float64, target)
+	step := float64(len(raw)-1) / float64(target-1)
+	for i := 0; i < target; i++ {
+		idx := int(float64(i)*step + 0.5)
+		if idx >= len(raw) {
+			idx = len(raw) - 1
+		}
+		res[i] = raw[idx]
+	}
+	return res
+}
+
 func (d *Daemon) pollHomeAssistant(c Connector) {
 	if c.URL == "" || c.Token == "" {
 		return
@@ -632,7 +839,7 @@ func (d *Daemon) pollHomeAssistant(c Connector) {
 		Proxy:           http.ProxyFromEnvironment,
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: c.Insecure},
 	}
-	client := &http.Client{Transport: tr, Timeout: 5 * time.Second}
+	client := &http.Client{Transport: tr, Timeout: 8 * time.Second}
 
 	for _, m := range c.Map {
 		if m.Source == "" {
@@ -670,15 +877,45 @@ func (d *Daemon) pollHomeAssistant(c Connector) {
 		json.NewDecoder(resp.Body).Decode(&st)
 		resp.Body.Close()
 
-		num, _ := strconv.ParseFloat(st.State, 64)
+		num, numErr := strconv.ParseFloat(st.State, 64)
 		text := st.State
 		if st.Attributes.UnitOfMeasurement != "" {
 			text += " " + st.Attributes.UnitOfMeasurement
 		}
 
+		// Fetch history from Home Assistant (up to 6 hours, decimated to 24 points)
+		var hist []float64
+		startISO := time.Now().UTC().Add(-6 * time.Hour).Format("2006-01-02T15:04:05Z")
+		histURL := fmt.Sprintf("%s/api/history/period/%s?filter_entity_id=%s&minimal_response&no_attributes",
+			strings.TrimRight(c.URL, "/"), startISO, m.Source)
+		histReq, hErr := http.NewRequest("GET", histURL, nil)
+		if hErr == nil {
+			histReq.Header.Set("Authorization", "Bearer "+c.Token)
+			histResp, hrErr := client.Do(histReq)
+			if hrErr == nil && histResp.StatusCode == http.StatusOK {
+				var rawHistory [][]struct {
+					State string `json:"state"`
+				}
+				if json.NewDecoder(histResp.Body).Decode(&rawHistory) == nil && len(rawHistory) > 0 {
+					var rawPts []float64
+					for _, item := range rawHistory[0] {
+						if v, e := strconv.ParseFloat(item.State, 64); e == nil {
+							rawPts = append(rawPts, v)
+						}
+					}
+					if len(rawPts) > 0 {
+						hist = decimateFloats(rawPts, 24)
+					}
+				}
+				histResp.Body.Close()
+			} else if histResp != nil {
+				histResp.Body.Close()
+			}
+		}
+
 		d.mu.Lock()
 		delete(d.failed, c.ID)
-		now := uint32(time.Now().Unix())
+		now := d.now()
 		sl := d.slots[m.Slot]
 		sl.Number = num
 		sl.Text = text
@@ -687,8 +924,25 @@ func (d *Daemon) pollHomeAssistant(c Connector) {
 		if sl.TTL == 0 {
 			sl.TTL = 600
 		}
-		sl.OK = true
+		sl.OK = (numErr == nil)
 		sl.Connector = c.ID
+
+		if len(hist) >= 2 {
+			sl.History = hist
+			sl.HistoryLen = len(hist)
+		} else if numErr == nil {
+			// Local accumulation ring buffer fallback if HA history has few points
+			sl.History = append(sl.History, num)
+			if len(sl.History) > 24 {
+				sl.History = sl.History[len(sl.History)-24:]
+			}
+			sl.HistoryLen = len(sl.History)
+		}
+
+		if len(sl.History) >= 2 {
+			sl.Delta = sl.Number - sl.History[0]
+		}
+
 		d.slots[m.Slot] = sl
 		d.mu.Unlock()
 	}
@@ -742,7 +996,7 @@ func (d *Daemon) pollClaudeLimits(c Connector) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
 
 	d.slots["limit.claude.5h"] = Slot{
 		Number:    data.FiveHour.Utilization,
@@ -811,7 +1065,7 @@ func (d *Daemon) pollCodexLimits(c Connector) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		delete(d.failed, c.ID)
-		now := uint32(time.Now().Unix())
+		now := d.now()
 		d.slots["limit.codex"] = Slot{
 			Number:    pct,
 			Text:      fmt.Sprintf("%.0f%%", pct),
@@ -1111,7 +1365,7 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
 
 	d.slots["limit.antigravity.5h"] = Slot{
 		Number:    pct,
@@ -1128,6 +1382,57 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 		OK:        true,
 		Connector: c.ID,
 	}
+}
+
+func decodeMIME(s string) string {
+	dec := new(mime.WordDecoder)
+	decoded, err := dec.DecodeHeader(s)
+	if err != nil || decoded == "" {
+		return s
+	}
+	return decoded
+}
+
+func formatMailTime(dateStr string, timezoneMinutes int, lang string, nowUnix int64) string {
+	if dateStr == "" {
+		if lang == "ru" {
+			return "сегодня"
+		}
+		return "today"
+	}
+	t, err := mail.ParseDate(dateStr)
+	if err != nil {
+		t, err = time.Parse(time.RFC1123Z, dateStr)
+		if err != nil {
+			t, err = time.Parse(time.RFC1123, dateStr)
+		}
+	}
+	if err != nil {
+		if lang == "ru" {
+			return "сегодня"
+		}
+		return "today"
+	}
+
+	loc := time.FixedZone("Local", timezoneMinutes*60)
+	tLocal := t.In(loc)
+	nowLocal := time.Unix(nowUnix, 0).In(loc)
+
+	isRu := lang == "ru"
+
+	if tLocal.Year() == nowLocal.Year() && tLocal.YearDay() == nowLocal.YearDay() {
+		return tLocal.Format("15:04")
+	}
+
+	yesterday := nowLocal.AddDate(0, 0, -1)
+	if tLocal.Year() == yesterday.Year() && tLocal.YearDay() == yesterday.YearDay() {
+		if isRu {
+			return "Вчера"
+		}
+		return "yesterday"
+	}
+
+	return fmt.Sprintf("%d.%02d", tLocal.Day(), tLocal.Month())
 }
 
 func (d *Daemon) pollIMAP(c Connector) {
@@ -1215,8 +1520,8 @@ func (d *Daemon) pollIMAP(c Connector) {
 	}
 	var headers []EmailHeader
 
-	// Fetch headers of up to 3 most recent emails
-	fetchCount := 3
+	// Fetch headers of up to 5 most recent emails
+	fetchCount := 5
 	if unreadCount < fetchCount {
 		fetchCount = unreadCount
 	}
@@ -1243,18 +1548,22 @@ func (d *Daemon) pollIMAP(c Connector) {
 		headers = append(headers, cur)
 	}
 
-	// Clean up from names (strip angle brackets)
+	// Clean up from names (strip angle brackets and decode MIME)
 	for i := range headers {
+		headers[i].From = decodeMIME(headers[i].From)
 		if idx := strings.Index(headers[i].From, "<"); idx > 0 {
 			headers[i].From = strings.TrimSpace(headers[i].From[:idx])
 		}
 		headers[i].From = strings.Trim(headers[i].From, `"'`)
+		headers[i].Subject = decodeMIME(headers[i].Subject)
 	}
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
-	now := uint32(time.Now().Unix())
+	now := d.now()
+	tzMin := d.settings.TimezoneMinutes
+	lang := d.settings.Lang
 
 	d.slots["mail.unread"] = Slot{
 		Number:    float64(unreadCount),
@@ -1265,17 +1574,53 @@ func (d *Daemon) pollIMAP(c Connector) {
 		Connector: c.ID,
 	}
 
+	// Clear previous mail slots
+	for i := 1; i <= 6; i++ {
+		delete(d.slots, fmt.Sprintf("mail.%d.from", i))
+		delete(d.slots, fmt.Sprintf("mail.%d.subject", i))
+		delete(d.slots, fmt.Sprintf("mail.%d.time", i))
+	}
+
 	for idx, h := range headers {
 		keyFrom := fmt.Sprintf("mail.%d.from", idx+1)
 		keySub := fmt.Sprintf("mail.%d.subject", idx+1)
 		keyTime := fmt.Sprintf("mail.%d.time", idx+1)
 		d.slots[keyFrom] = Slot{Text: h.From, At: now, TTL: 900, OK: true, Connector: c.ID}
 		d.slots[keySub] = Slot{Text: h.Subject, At: now, TTL: 900, OK: true, Connector: c.ID}
-		d.slots[keyTime] = Slot{Text: "today", At: now, TTL: 900, OK: true, Connector: c.ID}
+		d.slots[keyTime] = Slot{Text: formatMailTime(h.Date, tzMin, lang, int64(now)), At: now, TTL: 900, OK: true, Connector: c.ID}
+	}
+}
+
+func keepPocketBookWiFiAlive() {
+	if _, err := os.Stat("/ebrmain/bin/netagent"); err == nil {
+		exec.Command("/ebrmain/bin/netagent", "ping").Run()
+	}
+	exec.Command("iwconfig", "wlan0", "power", "off").Run()
+}
+
+func ensurePocketBookWiFiConnected() {
+	ip := getLocalIP()
+	if ip == "" {
+		log.Printf("Wi-Fi disconnected! Triggering PocketBook network reconnect...")
+		if _, err := os.Stat("/ebrmain/bin/netagent"); err == nil {
+			exec.Command("/ebrmain/bin/netagent", "wifi", "on").Run()
+			exec.Command("/ebrmain/bin/netagent", "net", "on").Run()
+			exec.Command("/ebrmain/bin/netagent", "connect").Run()
+		}
+		if _, err := os.Stat("/ebrmain/bin/netconnect"); err == nil {
+			exec.Command("/ebrmain/bin/netconnect").Run()
+		}
+		exec.Command("iwconfig", "wlan0", "power", "off").Run()
 	}
 }
 
 func (d *Daemon) pollAllDue() {
+	// Keep Wi-Fi alive and prevent sleep on PocketBook
+	go func() {
+		keepPocketBookWiFiAlive()
+		ensurePocketBookWiFiConnected()
+	}()
+
 	d.mu.Lock()
 	connectors := make([]Connector, len(d.settings.Connectors))
 	copy(connectors, d.settings.Connectors)
@@ -1310,6 +1655,8 @@ func (d *Daemon) pollAllDue() {
 			}
 		case "weather":
 			go d.pollWeather(c)
+		case "geocode":
+			go d.pollGeocode(c)
 		case "homeassistant":
 			go d.pollHomeAssistant(c)
 		case "anthropic":
@@ -1341,12 +1688,13 @@ func (d *Daemon) renderFrame() error {
 	if !configured {
 		deviceSetupURL = setupURL
 	}
+	nowVal := d.now()
 	payload := StorePayload{
 		Device: DeviceInfo{
 			BatteryPct:      readBattery(),
 			WifiRSSI:        readRSSI(),
-			Now:             uint32(time.Now().Unix()),
-			NextUpdateAt:    uint32(time.Now().Unix() + 300),
+			Now:             nowVal,
+			NextUpdateAt:    nowVal + 300,
 			TimezoneMinutes: d.settings.TimezoneMinutes,
 			Lang:            d.settings.Lang,
 			SetupURL:        deviceSetupURL,
@@ -1365,10 +1713,19 @@ func (d *Daemon) renderFrame() error {
 		return err
 	}
 
+	// Persist slots to cache file on flash storage so restarts retain data
+	if len(payload.Slots) > 0 {
+		cacheFile := filepath.Join(filepath.Dir(d.cfgPath), "tablo_slots_cache.json")
+		if slotsData, err := json.Marshal(payload.Slots); err == nil {
+			_ = os.WriteFile(cacheFile, slotsData, 0644)
+		}
+	}
+
+	tmpOut := d.imgPath + ".tmp"
 	args := []string{
 		"-config", d.cfgPath,
 		"-slots", tmpSlotsFile,
-		"-out", d.imgPath,
+		"-out", tmpOut,
 		"-rot", d.rotMode,
 	}
 	if !configured {
@@ -1386,8 +1743,12 @@ func (d *Daemon) renderFrame() error {
 		return fmt.Errorf("renderer error: %v, out: %s, stderr: %s", err, outBuf.String(), errBuf.String())
 	}
 
+	os.Rename(tmpOut, d.imgPath)
+
 	// Trigger PocketBook image viewer display if running on PB
 	if _, err := os.Stat("/ebrmain/bin/openbook"); err == nil {
+		exec.Command("killall", "-9", "picviewer.app").Run()
+		time.Sleep(300 * time.Millisecond)
 		exec.Command("/ebrmain/bin/openbook", d.imgPath).Start()
 	}
 
@@ -1542,7 +1903,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		HistoryLen int    `json:"history_len"`
 	}
 
-	now := uint32(time.Now().Unix())
+	now := d.now()
 	slotsStatus := make(map[string]SlotStatus)
 	for k, sl := range d.slots {
 		age := uint32(0)
@@ -1562,7 +1923,7 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	setupURL := "http://pbtablo-setup.local:8080"
 
 	resp := map[string]interface{}{
-		"time_synced": true,
+		"time_synced": atomic.LoadInt32(&d.timeSynced) == 1,
 		"slots":       slotsStatus,
 		"failed":      d.failed,
 		"ip":          ip,
@@ -1610,6 +1971,143 @@ func (d *Daemon) handlePreview(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
+func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reader io.Reader = r.Body
+	defer r.Body.Close()
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		err := r.ParseMultipartForm(32 << 20)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse multipart form: %v", err), http.StatusBadRequest)
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Form field 'file' required: %v", err), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		reader = file
+	}
+
+	gzReader, err := gzip.NewReader(reader)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid gzip format: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer gzReader.Close()
+
+	tarReader := tar.NewReader(gzReader)
+
+	tabloDir := "/mnt/ext1/applications/.tablo"
+	if _, err := os.Stat(tabloDir); err != nil {
+		tabloDir = filepath.Clean(filepath.Join(filepath.Dir(d.rendererPath), ".."))
+	}
+	appsDir := "/mnt/ext1/applications"
+	if _, err := os.Stat(appsDir); err != nil {
+		appsDir = filepath.Clean(filepath.Join(tabloDir, ".."))
+	}
+	var updatedFiles []string
+
+	for {
+		header, err := tarReader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Tar extraction error: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		cleanName := filepath.Clean(header.Name)
+		if strings.HasPrefix(cleanName, "..") || strings.HasPrefix(cleanName, "/") {
+			continue
+		}
+
+		if header.Typeflag == tar.TypeDir {
+			continue
+		}
+
+		var targetPath string
+		isExecutable := false
+
+		if cleanName == "Tablo.app" {
+			targetPath = filepath.Join(appsDir, "Tablo.app")
+			isExecutable = true
+		} else if strings.HasPrefix(cleanName, "bin/") {
+			rel := strings.TrimPrefix(cleanName, "bin/")
+			targetPath = filepath.Join(tabloDir, "bin", rel)
+			isExecutable = true
+		} else if strings.HasPrefix(cleanName, "data/") {
+			rel := strings.TrimPrefix(cleanName, "data/")
+			targetPath = filepath.Join(tabloDir, "data", rel)
+		} else if cleanName == "tablo_live.png" || strings.HasPrefix(cleanName, "Photo/") {
+			targetPath = "/mnt/ext1/Photo/tablo_live.png"
+		} else {
+			targetPath = filepath.Join(tabloDir, cleanName)
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			http.Error(w, fmt.Sprintf("Mkdir failed for %s: %v", targetPath, err), http.StatusInternalServerError)
+			return
+		}
+
+		tmpPath := targetPath + ".ota_tmp"
+		f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Create file failed %s: %v", tmpPath, err), http.StatusInternalServerError)
+			return
+		}
+		if _, err := io.Copy(f, tarReader); err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			http.Error(w, fmt.Sprintf("Write failed %s: %v", tmpPath, err), http.StatusInternalServerError)
+			return
+		}
+		f.Close()
+
+		if isExecutable {
+			os.Chmod(tmpPath, 0755)
+		} else {
+			os.Chmod(tmpPath, 0644)
+		}
+
+		os.Remove(targetPath)
+		if err := os.Rename(tmpPath, targetPath); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to replace %s: %v", targetPath, err), http.StatusInternalServerError)
+			return
+		}
+
+		updatedFiles = append(updatedFiles, cleanName)
+		log.Printf("OTA: Updated %s -> %s", cleanName, targetPath)
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": fmt.Sprintf("Успешно установлено файлов: %d. Перезапуск Tablo...", len(updatedFiles)),
+		"files":   updatedFiles,
+	})
+
+	go func() {
+		time.Sleep(1 * time.Second)
+		log.Printf("OTA: Restarting Tablo launcher...")
+		if _, err := os.Stat("/mnt/ext1/applications/Tablo.app"); err == nil {
+			cmd := exec.Command("/bin/sh", "/mnt/ext1/applications/Tablo.app")
+			cmd.Start()
+		} else {
+			d.renderFrame()
+			syscall.Exec(os.Args[0], os.Args, os.Environ())
+		}
+	}()
+}
+
 // -----------------------------------------------------------------------------
 // Main Entry Point
 // -----------------------------------------------------------------------------
@@ -1623,6 +2121,10 @@ func main() {
 	rotMode := flag.String("rot", "right", "Rotation mode: right (600x800 PB625), left, or none (800x600)")
 	once := flag.Bool("once", false, "Fetch once, render once, and exit")
 	flag.Parse()
+
+	// Ignore SIGHUP so closing launcher shell won't kill background daemon
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGHUP)
 
 	// Disable TLS certificate verification on PocketBook (no root CA bundle installed in OS)
 	if tr, ok := http.DefaultTransport.(*http.Transport); ok {
@@ -1685,8 +2187,15 @@ func main() {
 	if err == nil {
 		var userSettings Settings
 		if err := json.Unmarshal(cfgBytes, &userSettings); err == nil {
+			settings.Configured = userSettings.Configured
+			if !settings.Configured && (len(userSettings.Dashboards) > 0 || len(userSettings.Connectors) > 0 || userSettings.City != "") {
+				settings.Configured = true
+			}
 			if len(userSettings.Dashboards) > 0 {
 				settings.Dashboards = userSettings.Dashboards
+			}
+			if len(userSettings.Networks) > 0 {
+				settings.Networks = userSettings.Networks
 			}
 			if len(userSettings.Connectors) > 0 {
 				settings.Connectors = userSettings.Connectors
@@ -1726,6 +2235,14 @@ func main() {
 		os.WriteFile(*cfgPath, data, 0644)
 	}
 
+	initialSlots := make(map[string]Slot)
+	cacheFile := filepath.Join(filepath.Dir(*cfgPath), "tablo_slots_cache.json")
+	if cData, err := os.ReadFile(cacheFile); err == nil {
+		if err := json.Unmarshal(cData, &initialSlots); err == nil {
+			log.Printf("Loaded %d cached slots from %s", len(initialSlots), cacheFile)
+		}
+	}
+
 	d := &Daemon{
 		cfgPath:      *cfgPath,
 		htmlPath:     *htmlPath,
@@ -1734,11 +2251,14 @@ func main() {
 		rotMode:      *rotMode,
 		port:         *port,
 		settings:     settings,
-		slots:        make(map[string]Slot),
+		slots:        initialSlots,
 		failed:       make(map[string]string),
 		lastPolled:   make(map[string]time.Time),
 		lastIP:       getLocalIP(),
 	}
+
+	// Initial time sync
+	d.syncTime()
 
 	// Initial poll and frame render
 	if settings.Configured {
@@ -1766,6 +2286,7 @@ func main() {
 	http.HandleFunc("/api/status", d.handleGetStatus)
 	http.HandleFunc("/api/scan", d.handleScan)
 	http.HandleFunc("/api/reboot", d.handleReboot)
+	http.HandleFunc("/api/update", d.handleUpdate)
 	http.HandleFunc("/api/preview.png", d.handlePreview)
 	http.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
 		data, err := os.ReadFile("/tmp/tablo.log")
@@ -1805,8 +2326,23 @@ func main() {
 	defer ticker.Stop()
 	lastHourFull := time.Now()
 	lastPoll := time.Time{}
+	lastTimeSync := time.Now()
+	lastNetPing := time.Now()
 
 	for range ticker.C {
+		if time.Since(lastNetPing) >= 20*time.Second {
+			lastNetPing = time.Now()
+			go func() {
+				keepPocketBookWiFiAlive()
+				ensurePocketBookWiFiConnected()
+			}()
+		}
+
+		if time.Since(lastTimeSync) >= 1*time.Hour || (atomic.LoadInt32(&d.timeSynced) == 0 && time.Since(lastTimeSync) >= 30*time.Second) {
+			lastTimeSync = time.Now()
+			go d.syncTime()
+		}
+
 		curIP := getLocalIP()
 		d.mu.Lock()
 		if curIP != d.lastIP {

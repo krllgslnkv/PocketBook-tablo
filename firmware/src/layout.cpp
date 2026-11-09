@@ -17,6 +17,8 @@
 #include <string>
 
 #include "../assets/terminus_14.h"
+#include "../assets/terminus_16.h"
+#include "../assets/terminus_20.h"
 #include "../assets/terminus_24.h"
 #include "config.h"
 #include "font.h"
@@ -124,27 +126,27 @@ void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = false) {
     }
 
     int16_t x = static_cast<int16_t>(c.width() - MARGIN);
-    int16_t clock_w = text_width(fonts::Terminus14, clock_buf);
+    int16_t clock_w = text_width(fonts::Terminus20, clock_buf);
     x = static_cast<int16_t>(x - clock_w);
-    draw_text(c, fonts::Terminus14, x, 38, clock_buf, Color::Black, 1, /*bold=*/true);
+    draw_text(c, fonts::Terminus20, x, 32, clock_buf, Color::Black, 1, /*bold=*/true);
     x = static_cast<int16_t>(x - 16);
 
     if (d.battery_pct >= 0) {
         char batt_buf[8];
         std::snprintf(batt_buf, sizeof(batt_buf), "%d%%", d.battery_pct);
-        int16_t w = text_width(fonts::Terminus14, batt_buf);
+        int16_t w = text_width(fonts::Terminus16, batt_buf);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus14, x, 38, batt_buf, Color::Black, 1, /*bold=*/true);
+        draw_text(c, fonts::Terminus16, x, 32, batt_buf, Color::Black, 1, /*bold=*/true);
         x = static_cast<int16_t>(x - 4 - 22);
-        draw_battery_icon(c, x, 26, d.battery_pct);  // низ на базовой линии текста (38)
+        draw_battery_icon(c, x, 20, d.battery_pct);
     } else {
         const char* usb = "USB";
-        int16_t w = text_width(fonts::Terminus14, usb);
+        int16_t w = text_width(fonts::Terminus16, usb);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus14, x, 38, usb, Color::Black, 1, /*bold=*/true);
+        draw_text(c, fonts::Terminus16, x, 32, usb, Color::Black, 1, /*bold=*/true);
     }
     x = static_cast<int16_t>(x - 16 - 22);
-    draw_wifi_bars(c, x, 22, wifi_bars(d.wifi_rssi));  // низ на базовой линии текста (38)
+    draw_wifi_bars(c, x, 18, wifi_bars(d.wifi_rssi));
 
     c.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(c.width() - 2 * MARGIN), 2,
                 Color::Black);
@@ -419,7 +421,18 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
     }
 
     if (!has_any_data || (!row_has[0] && !row_has[1])) {
-        draw_setup(canvas, device, device.setup_url);
+        if (device.setup_url.length() > 0) {
+            draw_setup(canvas, device, device.setup_url);
+            return;
+        }
+        // Устройство настроено, но данных пока нет (например, подключение к Wi-Fi при загрузке)
+        const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
+        const char* msg = is_ru ? "Подключение к сети · Ожидание данных..."
+                                : "Connecting to network · Waiting for data...";
+        int16_t mw = text_width(fonts::Terminus20, msg);
+        int16_t mx = static_cast<int16_t>((canvas.width() - mw) / 2);
+        int16_t my = static_cast<int16_t>(body.y + body.h / 2);
+        draw_text(canvas, fonts::Terminus20, mx, my, msg, Color::Black, 1, /*bold=*/true);
         return;
     }
 
