@@ -145,7 +145,7 @@ jobs:
           chmod +x "$DIST/applications/Tablo.app"
 
           # 1. OTA update archive (consumed directly by PocketBook over Wi-Fi)
-          (cd "$DIST" && tar -czf update.tar.gz -C applications Tablo.app -C applications/.tablo bin data)
+          (cd "$DIST" && tar -czf update.tar.gz -C applications Tablo.app -C .tablo bin data)
 
           # 2. Complete ZIP package for manual USB installation
           (cd "$DIST" && zip -r "PocketBook-tablo-${TAG:-latest}.zip" applications tablo_config.json Photo)
