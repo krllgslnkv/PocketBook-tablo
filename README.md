@@ -21,7 +21,7 @@
 - **Rates & Markets:** Live BTC price with a 24-hour mini-chart; USD/RUB and EUR/RUB official exchange rates with daily change indicators.
 - **AI Quota Limits:** Visual gauges and reset countdowns for 5-hour and weekly quotas (Antigravity, Claude Code, OpenAI Codex).
 - **Home Assistant:** temperature, humidity, CO2, and other smart home sensors.
-- **Mail:** unread count and the 5 latest messages.
+- **Mail:** unread count and latest messages.
 - **Weather:** Current temperature and daily forecast via Open-Meteo with automatic geocoding.
 - **Web Setup Portal:** Easy configuration directly from your phone or PC browser at `http://pb-tablo.local:8080`.
 - **OTA Updates via GitHub:** Update to new releases over Wi-Fi with a single click.
