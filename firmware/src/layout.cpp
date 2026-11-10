@@ -322,11 +322,21 @@ void compute_columns_fixed_second(Rect row, int16_t gap, bool first_visible, boo
 }
 
 void compute_two_rows(Rect body, int16_t gap, bool row1_has, bool row2_has, Rect* row1,
-                      Rect* row2) {
+                      Rect* row2, bool expand_top = false) {
     if (row1_has && row2_has) {
-        // Поднимаем разделитель вверх (~49% от total), освобождая место под 5 писем в нижнем ряду (~51%)
         int16_t total = static_cast<int16_t>(body.h - gap);
-        int16_t h1 = static_cast<int16_t>((total * 250 + 255) / 510);
+        int16_t h1;
+        if (body.h <= 420) {
+            // Оригинальное соотношение 800x480 (TRMNL 7.5" от Pavel Lunev) — 235px верхний ряд
+            h1 = static_cast<int16_t>(total * 0.603f);
+        } else if (expand_top) {
+            // PocketBook 800x600 при наличии 3 агентов И климата — расширяем верхний ряд до 328px,
+            // давая плашкам СВЕЖО/НОРМА аккуратный отступ от разделителя рядов
+            h1 = static_cast<int16_t>((total * 328 + 255) / 510);
+        } else {
+            // PocketBook 800x600 — освобождаем место под 5 писем в нижнем ряду (~51%)
+            h1 = static_cast<int16_t>((total * 250 + 255) / 510);
+        }
         int16_t h2 = static_cast<int16_t>(total - h1);
         *row1 = Rect{body.x, body.y, body.w, h1};
         *row2 = Rect{body.x, static_cast<int16_t>(body.y + h1 + gap), body.w, h2};
@@ -462,8 +472,16 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
         return;
     }
 
+    bool has_claude = layout::has_data(store.find("limit.claude.5h")) || layout::has_data(store.find("limit.claude.week"));
+    bool has_codex = layout::has_data(store.find("limit.codex"));
+    bool has_antigravity = layout::has_data(store.find("limit.antigravity.5h")) || layout::has_data(store.find("limit.antigravity.week"));
+    bool has_air = layout::has_data(store.find("co2")) || layout::has_data(store.find("tvoc")) ||
+                   layout::has_data(store.find("temp")) || layout::has_data(store.find("hum")) ||
+                   layout::has_data(store.find("temperature")) || layout::has_data(store.find("humidity"));
+    bool expand_top = (has_claude && has_codex && has_antigravity && has_air);
+
     Rect row1, row2;
-    compute_two_rows(body, row_gap, row_has[0], row_has[1], &row1, &row2);
+    compute_two_rows(body, row_gap, row_has[0], row_has[1], &row1, &row2, expand_top);
 
     if (row_has[0] && row_has[1]) {
         // Разделитель садится на границу рядов, а не в середину зазора

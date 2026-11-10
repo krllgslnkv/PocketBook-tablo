@@ -12,7 +12,9 @@
 
 #ifndef _WIN32
 #include <fcntl.h>
+#ifdef __linux__
 #include <linux/fb.h>
+#endif
 #include <sys/ioctl.h>
 #include <unistd.h>
 #endif
@@ -63,7 +65,7 @@ void rotate_90_left(const canvas::CanvasMemory& src, canvas::CanvasMemory& dst) 
 }
 
 bool auto_detect_screen(int& out_w, int& out_h) {
-#ifndef _WIN32
+#ifdef __linux__
     int fb = open("/dev/fb0", O_RDONLY);
     if (fb >= 0) {
         struct fb_var_screeninfo vinfo;

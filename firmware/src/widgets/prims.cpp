@@ -289,7 +289,7 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
 
     String val = layout::format_value(s, now, decimals, "");
     int16_t value_x = multiline ? area.x : static_cast<int16_t>(area.x + label_w + 8);
-    int16_t val_baseline = multiline ? static_cast<int16_t>(baseline + 34) : static_cast<int16_t>(baseline + 4);
+    int16_t val_baseline = multiline ? static_cast<int16_t>(baseline + 30) : static_cast<int16_t>(baseline + 4);
 
     draw_text(c, fonts::PlexMono41, value_x, val_baseline, val.c_str(), Color::Black);
     int16_t vw = text_width(fonts::PlexMono41, val.c_str());
@@ -319,8 +319,9 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
         draw_sparkline(c, Rect{area.x, spark_top, spark_w, kSparkH}, spark, n);
     }
 
+    // Выравниваем плашку статуса по нижнему краю спарклайна, чтобы она не нависала вниз к разделителю
     draw_state_tag(c, static_cast<int16_t>(area.x + area.w),
-                   static_cast<int16_t>(spark_top + kSparkH + 5), state, alarm, quiet);
+                   static_cast<int16_t>(spark_top + kSparkH - 5), state, alarm, quiet);
 }
 
 // Текст причины отказа для строки лимита: слот `<id>.status` с ok=false и

@@ -40,7 +40,7 @@ var embeddedDefaultConfig []byte
 var embeddedIndexHTML []byte
 
 const (
-	AppVersion        = "v1.0.0"
+	AppVersion        = "v1.0.1"
 	DefaultGithubRepo = "krllgslnkv/PocketBook-tablo"
 )
 
