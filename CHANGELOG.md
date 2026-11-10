@@ -1,22 +1,25 @@
 # Changelog
 
-Все ключевые изменения проекта документируются в этом файле.
+All notable changes to this project will be documented in this file.
 
 ## [v1.0.1] - 2026-11-10
 
-### Добавлено
-- Адаптивное динамическое расширение верхнего ряда (`expand_top` до 328 px) при одновременной активности 3 ИИ-агентов (Claude, GPT, Antigravity) и домашнего климата.
-- Выравнивание плашек статуса «СВЕЖО» и «НОРМА» по нижнему краю спарклайна с отступом 12 px от разделителя рядов.
-- Поддержка нативной компиляции рендерера на macOS.
+### Added
+- Adaptive row layout scaling for multiple AI agent quotas and climate metrics.
+- Native host compilation support for macOS.
 
-### Изменено
-- Версия встроенного демона обновлена до v1.0.1.
+### Fixed
+- Status badge vertical alignment and row divider spacing.
+- Dynamic email list clipping in compact layouts.
+
+### Changed
+- Internal daemon version bumped to v1.0.1.
 
 ## [v1.0.0] - 2026-11-10
 
-### Первый стабильный релиз
-- Автономный демон для читалок PocketBook (ARMv7).
-- Встроенный веб-портал настройки на `http://pb-tablo.local:8080`.
-- Поддержка мониторинга квот Claude, GPT и Antigravity.
-- Виджеты рынков, климата, почты и погоды.
-- Поддержка беспроводного обновления (OTA).
+### Initial Release
+- Standalone PocketBook daemon for ARMv7 devices.
+- Web setup portal on `http://pb-tablo.local:8080`.
+- Quota monitoring for Claude, GPT, and Antigravity.
+- Market, climate, mail, and weather widgets.
+- Over-the-air (OTA) wireless updates.
