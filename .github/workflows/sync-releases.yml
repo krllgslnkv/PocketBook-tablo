@@ -1,0 +1,32 @@
+name: Sync Release Notes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/releases/**'
+      - 'CHANGELOG.md'
+      - '.github/workflows/sync-releases.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync Release Descriptions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update Release Notes via GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -f "docs/releases/v1.0.1.md" ]; then
+            gh release edit v1.0.1 --notes-file "docs/releases/v1.0.1.md"
+          fi
+          if [ -f "docs/releases/v1.0.0.md" ]; then
+            gh release edit v1.0.0 --notes-file "docs/releases/v1.0.0.md"
+          fi
