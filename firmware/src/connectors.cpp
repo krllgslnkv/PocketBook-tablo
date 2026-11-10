@@ -1141,9 +1141,11 @@ int fetch_status(const String& url, const String& bearer_token, const char* extr
 // различаются, тело и разбор ответа (parse_oauth_refresh) — общие. scope
 // nullptr — поле не отправляется (Anthropic его не ждёт). pinned_ca nullptr —
 // общий бандл; иначе закреплённый корень (см. pinned_roots.h, п.9).
+// invalid_grant_out — сервер прямо сказал, что refresh-токен недействителен
+// (истёк или отозван): ждать и повторять бессмысленно, нужен новый вход.
 bool refresh_oauth_token(const char* token_url, const char* client_id, const char* scope,
                          const char* pinned_ca, const String& refresh_token, String& new_access,
-                         String& new_refresh) {
+                         String& new_refresh, bool* invalid_grant_out = nullptr) {
     if (refresh_token.length() == 0) return false;
 
     JsonDocument req;
@@ -1181,6 +1183,7 @@ bool refresh_oauth_token(const char* token_url, const char* client_id, const cha
         String head = body.substring(0, 200);
         head.replace("\n", " ");
         Serial.printf("  refresh: сервер ответил %d, тело: %s\n", code, head.c_str());
+        if (invalid_grant_out != nullptr && body.indexOf("invalid_grant") >= 0) *invalid_grant_out = true;
         return false;
     }
     return parse_oauth_refresh(body, refresh_token, new_access, new_refresh);
@@ -1258,7 +1261,20 @@ bool try_refresh(const config::Connector& c, uint32_t now, const char* token_url
     }
     Serial.printf("коннектор «%s»: токен протух, обновляю через refresh_token\n", c.id.c_str());
     String new_access, new_refresh;
-    if (!refresh_oauth_token(token_url, client_id, scope, pinned_ca, refresh, new_access, new_refresh)) {
+    bool invalid_grant = false;
+    if (!refresh_oauth_token(token_url, client_id, scope, pinned_ca, refresh, new_access, new_refresh,
+                             &invalid_grant)) {
+        if (invalid_grant) {
+            // «Refresh token expired» (Anthropic, 2026-11-04): пара мертва
+            // целиком, повторы ничего не дадут — только новый вход на
+            // странице настройки. Пауза сутки, чтобы не дёргать сервер зря,
+            // а причина на панели говорит, что делать.
+            refresh_backoff_until_[key] = now + 24 * 3600;
+            Serial.printf("коннектор «%s»: refresh-токен недействителен — нужен новый вход\n",
+                          c.id.c_str());
+            store.mark_failed(c.id, i18n::tr(i18n::Str::kRefreshTokenExpired));
+            return false;
+        }
         refresh_backoff_until_[key] = now + 3600;
         Serial.printf("коннектор «%s»: обновить токен не удалось, следующая попытка через час\n",
                       c.id.c_str());
@@ -1687,17 +1703,37 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             String body;
             int retry_after = 0;
             int status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
-                                       "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
+                                       "oauth-2025-04-20", body, kPinnedRootsPem, &retry_after);
 
             if (status == HTTP_CODE_UNAUTHORIZED) {
                 // access_token живёт около восьми часов — обновляем пару ровно
                 // один раз и повторяем сам запрос тоже один раз, без циклов.
-                if (!try_refresh(c, now, kAnthropicTokenUrl, kAnthropicClientId, nullptr, nullptr,
-                                 access, store)) {
+                if (!try_refresh(c, now, kAnthropicTokenUrl, kAnthropicClientId, nullptr,
+                                 kPinnedRootsPem, access, store)) {
                     continue;
                 }
                 status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
-                                      "oauth-2025-04-20", body, kGtsRootR4Pem, &retry_after);
+                                      "oauth-2025-04-20", body, kPinnedRootsPem, &retry_after);
+            } else if (status == HTTP_CODE_TOO_MANY_REQUESTS) {
+                // 429 у Anthropic — не только лимит частоты: на просроченный или
+                // отозванный access-токен сервер тоже отвечает rate_limit_error,
+                // и Retry-After растёт с каждым обращением (сентябрь и ноябрь
+                // 2026 — оба раза блок стоял часами, а лечила только новая
+                // пара). Пробуем обновить пару и повторить один раз; try_refresh
+                // сам держит паузу в час между попытками, так что лишней
+                // ротации при честном лимите не будет чаще раза в час.
+                if (try_refresh(c, now, kAnthropicTokenUrl, kAnthropicClientId, nullptr,
+                                kPinnedRootsPem, access, store)) {
+                    status = fetch_status(kAnthropicUsageUrl, access, "anthropic-beta",
+                                          "oauth-2025-04-20", body, kPinnedRootsPem, &retry_after);
+                } else {
+                    // Причину уже поставил try_refresh (истёк refresh / отложено /
+                    // не удалось) — она важнее «подождите», не перебиваем её;
+                    // паузу по Retry-After держим всё равно.
+                    const uint32_t pause = static_cast<uint32_t>(retry_after > 60 ? retry_after : 60) + 30;
+                    schedule_.hold(c.id, now + pause);
+                    continue;
+                }
             }
 
             if (status == HTTP_CODE_OK) {
@@ -1780,16 +1816,16 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             // refresh-токен (try_refresh ниже), как у Claude.
             String access = access_token_for(c);
             String body;
-            int status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kGtsRootR4Pem);
+            int status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kPinnedRootsPem);
 
             if (status == HTTP_CODE_UNAUTHORIZED) {
                 // Токен Codex живёт около десяти дней; refresh-токен из auth.json
                 // Codex CLI позволяет обновлять пару так же, как у Claude.
                 if (!try_refresh(c, now, kCodexTokenUrl, kCodexClientId, kCodexRefreshScope,
-                                 kIsrgRootsPem, access, store)) {
+                                 kPinnedRootsPem, access, store)) {
                     continue;
                 }
-                status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kGtsRootR4Pem);
+                status = fetch_status(kCodexUsageUrl, access, nullptr, nullptr, body, kPinnedRootsPem);
             }
 
             if (status == HTTP_CODE_OK) {
@@ -1845,7 +1881,7 @@ void poll_due(const config::Settings& settings, slots::Store& store, uint32_t no
             std::vector<MailSummary> recent;
             String reason;
             if (!imap_fetch_mailbox(c.url, 993, c.username, c.token, unread, recent, now,
-                                    settings.timezone_minutes, kGtsRootR1Pem, reason)) {
+                                    settings.timezone_minutes, kPinnedRootsPem, reason)) {
                 Serial.printf("коннектор «%s»: почтовый сервер не ответил\n", c.id.c_str());
                 store.mark_failed(c.id, reason.length() > 0 ? reason : String(i18n::tr(i18n::Str::kMailNoAnswer)));
             } else {

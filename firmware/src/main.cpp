@@ -293,6 +293,10 @@ void loop() {
             // для диагностики «почему пусто» хватает ok/age/error.
             JsonDocument doc;
             doc["time_synced"] = g_time_synced;
+            // Свободная куча — цена TLS с набором из двух десятков корней видна
+            // без кабеля; падение к нулю здесь — первый признак беды с памятью.
+            doc["heap_free"] = ESP.getFreeHeap();
+            doc["heap_min_free"] = ESP.getMinFreeHeap();
             JsonObject slots_obj = doc["slots"].to<JsonObject>();
             for (const auto& kv : g_slots.all()) {
                 const slots::Slot& sl = kv.second;
