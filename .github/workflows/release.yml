@@ -21,15 +21,16 @@ jobs:
       - name: Install ARM cross-compiler and tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-arm-linux-gnueabi qemu-user-static zip
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends g++-arm-linux-gnueabi zip
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
 
-      - name: Build C++ Static ARM Renderer (800x600 for PocketBook)
+      - name: Build C++ Static ARM and Host Renderers
         run: |
+          # 1. ARM renderer for PocketBook
           arm-linux-gnueabi-g++ -static -std=gnu++17 -O2 -DNATIVE_BUILD \
             -Ifirmware/src -Ifirmware/test/test_config \
             -Ipocketbook/libs/qrcode -Ipocketbook/libs/arduinojson \
@@ -44,6 +45,22 @@ jobs:
             firmware/src/widgets/w_text.cpp firmware/src/widgets/registry.cpp \
             pocketbook/libs/qrcode/qrcode.c \
             -o pocketbook/tablo_render_arm
+
+          # 2. Host renderer for generating initial boot/setup image
+          g++ -std=gnu++17 -O2 -DNATIVE_BUILD \
+            -Ifirmware/src -Ifirmware/test/test_config \
+            -Ipocketbook/libs/qrcode -Ipocketbook/libs/arduinojson \
+            pocketbook/tablo_render.cpp \
+            firmware/src/layout.cpp firmware/src/canvas.cpp firmware/src/canvas_mem.cpp \
+            firmware/src/font.cpp firmware/src/i18n.cpp firmware/src/slots.cpp \
+            firmware/src/wifi_qr.cpp firmware/src/widgets/types.cpp \
+            firmware/src/widgets/prims.cpp firmware/src/widgets/w_markets.cpp \
+            firmware/src/widgets/w_limits.cpp firmware/src/widgets/w_air.cpp \
+            firmware/src/widgets/w_limits_air.cpp firmware/src/widgets/w_mail.cpp \
+            firmware/src/widgets/w_today.cpp firmware/src/widgets/w_metric.cpp \
+            firmware/src/widgets/w_text.cpp firmware/src/widgets/registry.cpp \
+            pocketbook/libs/qrcode/qrcode.c \
+            -o pocketbook/tablo_render_host
 
       - name: Build Go Static ARM Daemon
         run: |
@@ -68,8 +85,7 @@ jobs:
           cp pocketbook/default_config.json "$DIST/tablo_config.json"
 
           # Render boot / setup image
-          chmod +x ./pocketbook/tablo_render_arm
-          qemu-arm-static ./pocketbook/tablo_render_arm \
+          ./pocketbook/tablo_render_host \
             -config pocketbook/default_config.json \
             -setup \
             -setup-url "http://pb-tablo.local:8080" \
