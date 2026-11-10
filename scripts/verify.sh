@@ -36,7 +36,7 @@ done
 export PATH
 
 if ! command -v pio >/dev/null 2>&1; then
-    echo "❌ pio (PlatformIO) не найден в PATH: pip install --user platformio" >&2
+    echo "[FAIL] pio (PlatformIO) не найден в PATH: pip install --user platformio" >&2
     exit 2
 fi
 
@@ -62,15 +62,15 @@ run_step() {
     return "$rc"
 }
 
-echo "🏗  verify"
+echo "[START] verify"
 run_step Build pio run -e xiao-esp32s3
 if [ "$FAST" = 0 ] && [ "$FAILED" = 0 ]; then
     run_step Tests pio test -e native
 fi
 
 if [ "$FAILED" = 0 ]; then
-    echo "✅ verify PASS"
+    echo "[PASS] verify PASS"
     exit 0
 fi
-echo "❌ verify FAIL"
+echo "[FAIL] verify FAIL"
 exit 1
