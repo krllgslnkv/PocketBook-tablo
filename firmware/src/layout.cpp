@@ -87,15 +87,22 @@ void draw_wifi_bars(Canvas& c, int16_t x, int16_t y, int8_t bars) {
                         static_cast<int16_t>(bar_h - 2), Color::Black);
         }
     }
+    if (bars == 0) {
+        // Перечёркивание иконки при отсутствии соединения с Wi-Fi
+        c.line(static_cast<int16_t>(x - 1), static_cast<int16_t>(y + kIconH),
+               static_cast<int16_t>(x + 27), y, Color::Black);
+        c.line(static_cast<int16_t>(x - 1), static_cast<int16_t>(y + kIconH - 1),
+               static_cast<int16_t>(x + 27), static_cast<int16_t>(y - 1), Color::Black);
+    }
 }
 
 void draw_battery_icon(Canvas& c, int16_t x, int16_t y, int8_t pct) {
-    c.rect(x, y, 20, 12, Color::Black);
-    c.fill_rect(static_cast<int16_t>(x + 20), static_cast<int16_t>(y + 3), 2, 6, Color::Black);
+    c.rect(x, y, 22, 13, Color::Black);
+    c.fill_rect(static_cast<int16_t>(x + 22), static_cast<int16_t>(y + 3), 2, 7, Color::Black);
     int8_t clamped = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
-    int16_t fill_w = static_cast<int16_t>((20 - 4) * clamped / 100);
+    int16_t fill_w = static_cast<int16_t>((22 - 4) * clamped / 100);
     if (fill_w > 0) {
-        c.fill_rect(static_cast<int16_t>(x + 2), static_cast<int16_t>(y + 2), fill_w, 8,
+        c.fill_rect(static_cast<int16_t>(x + 2), static_cast<int16_t>(y + 2), fill_w, 9,
                     Color::Black);
     }
 }
@@ -105,15 +112,21 @@ void draw_battery_icon(Canvas& c, int16_t x, int16_t y, int8_t pct) {
 void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = false) {
     Civil now_civil = to_civil(d.now, d.timezone_minutes);
 
+    const int16_t margin = (c.width() == 800) ? 15 : static_cast<int16_t>((c.width() * 15 + 400) / 800);
+    const int16_t header_rule_y = (c.height() == 600) ? 49 : static_cast<int16_t>((c.height() * 49 + 300) / 600);
+    const int16_t header_baseline = (c.height() == 600) ? 32 : static_cast<int16_t>((c.height() * 32 + 300) / 600);
+    const int16_t icon_y = static_cast<int16_t>(header_baseline - 13);
+    const int16_t wifi_y = static_cast<int16_t>(header_baseline - 16);
+
     char date_buf[48];
     std::snprintf(date_buf, sizeof(date_buf), "%s · %d %s", i18n::weekday(now_civil.weekday),
                   now_civil.day, i18n::month(now_civil.month - 1));
-    draw_text(c, fonts::Terminus24, MARGIN, 32, date_buf, Color::Black, 1, /*bold=*/true);
+    draw_text(c, fonts::Terminus24, margin, header_baseline, date_buf, Color::Black, 1, /*bold=*/true);
 
     if (show_setup_url && d.setup_url.length() > 0) {
         int16_t url_w = text_width(fonts::Terminus14, d.setup_url.c_str());
         int16_t url_x = static_cast<int16_t>((c.width() - url_w) / 2);
-        draw_text(c, fonts::Terminus14, url_x, 38, d.setup_url.c_str(), Color::Black, 1, false);
+        draw_text(c, fonts::Terminus14, url_x, static_cast<int16_t>(header_baseline + 6), d.setup_url.c_str(), Color::Black, 1, false);
     }
 
     char clock_buf[24];
@@ -125,30 +138,30 @@ void draw_header(Canvas& c, const DeviceInfo& d, bool show_setup_url = false) {
         std::snprintf(clock_buf, sizeof(clock_buf), "%02d:%02d", now_civil.hour, now_civil.minute);
     }
 
-    int16_t x = static_cast<int16_t>(c.width() - MARGIN);
-    int16_t clock_w = text_width(fonts::Terminus20, clock_buf);
+    int16_t x = static_cast<int16_t>(c.width() - margin);
+    int16_t clock_w = text_width(fonts::Terminus24, clock_buf);
     x = static_cast<int16_t>(x - clock_w);
-    draw_text(c, fonts::Terminus20, x, 32, clock_buf, Color::Black, 1, /*bold=*/true);
+    draw_text(c, fonts::Terminus24, x, header_baseline, clock_buf, Color::Black, 1, /*bold=*/true);
     x = static_cast<int16_t>(x - 16);
 
     if (d.battery_pct >= 0) {
         char batt_buf[8];
         std::snprintf(batt_buf, sizeof(batt_buf), "%d%%", d.battery_pct);
-        int16_t w = text_width(fonts::Terminus16, batt_buf);
+        int16_t w = text_width(fonts::Terminus20, batt_buf);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus16, x, 32, batt_buf, Color::Black, 1, /*bold=*/true);
-        x = static_cast<int16_t>(x - 4 - 22);
-        draw_battery_icon(c, x, 20, d.battery_pct);
+        draw_text(c, fonts::Terminus20, x, header_baseline, batt_buf, Color::Black, 1, /*bold=*/true);
+        x = static_cast<int16_t>(x - 6 - 24);
+        draw_battery_icon(c, x, icon_y, d.battery_pct);
     } else {
         const char* usb = "USB";
-        int16_t w = text_width(fonts::Terminus16, usb);
+        int16_t w = text_width(fonts::Terminus20, usb);
         x = static_cast<int16_t>(x - w);
-        draw_text(c, fonts::Terminus16, x, 32, usb, Color::Black, 1, /*bold=*/true);
+        draw_text(c, fonts::Terminus20, x, header_baseline, usb, Color::Black, 1, /*bold=*/true);
     }
     x = static_cast<int16_t>(x - 16 - 22);
-    draw_wifi_bars(c, x, 18, wifi_bars(d.wifi_rssi));
+    draw_wifi_bars(c, x, wifi_y, wifi_bars(d.wifi_rssi));
 
-    c.fill_rect(MARGIN, HEADER_RULE_Y, static_cast<int16_t>(c.width() - 2 * MARGIN), 2,
+    c.fill_rect(margin, header_rule_y, static_cast<int16_t>(c.width() - 2 * margin), 2,
                 Color::Black);
 }
 
@@ -311,11 +324,10 @@ void compute_columns_fixed_second(Rect row, int16_t gap, bool first_visible, boo
 void compute_two_rows(Rect body, int16_t gap, bool row1_has, bool row2_has, Rect* row1,
                       Rect* row2) {
     if (row1_has && row2_has) {
-        // Соотношение — не произвольное 50/50, а из обмера эталона: верхний
-        // ряд (Рынки/Лимиты/Воздух) занимает заметно больше высоты нижнего
-        // (Почта/Сегодня) — 235px против 154px на теле кадра 390px без зазора.
-        int16_t h1 = static_cast<int16_t>((body.h - gap) * 0.603f);
-        int16_t h2 = static_cast<int16_t>(body.h - gap - h1);
+        // Поднимаем разделитель вверх (~49% от total), освобождая место под 5 писем в нижнем ряду (~51%)
+        int16_t total = static_cast<int16_t>(body.h - gap);
+        int16_t h1 = static_cast<int16_t>((total * 250 + 255) / 510);
+        int16_t h2 = static_cast<int16_t>(total - h1);
         *row1 = Rect{body.x, body.y, body.w, h1};
         *row2 = Rect{body.x, static_cast<int16_t>(body.y + h1 + gap), body.w, h2};
     } else if (row1_has) {
@@ -344,7 +356,7 @@ void layout_row(Rect row, int16_t gap, const std::vector<widgets::Instance>& ite
         if (items[i].size == widgets::Size::kFlex) {
             ++flex_count;
         } else {
-            fixed_sum = static_cast<int16_t>(fixed_sum + widgets::size_px(items[i].size));
+            fixed_sum = static_cast<int16_t>(fixed_sum + widgets::size_px(items[i].size, row.w));
         }
     }
     if (visible_count == 0) return;
@@ -360,9 +372,9 @@ void layout_row(Rect row, int16_t gap, const std::vector<widgets::Instance>& ite
     // получал бы отрицательную ширину, а хвост ряда уезжал за край панели
     // молча. Делим поровну между видимыми — кадр остаётся в границах, а
     // владелец видит на предпросмотре и на панели одно и то же.
-    constexpr int16_t kMinFlexWidth = 120;
+    const int16_t min_flex = static_cast<int16_t>((row.w * 120 + 385) / 770);
     const bool overflow =
-        fixed_sum + gap_total + static_cast<int16_t>(flex_count) * kMinFlexWidth > row.w;
+        fixed_sum + gap_total + static_cast<int16_t>(flex_count) * min_flex > row.w;
     const bool equal_split = flex_count == 0 || overflow;
 
     int16_t equal_w = 0;
@@ -380,7 +392,7 @@ void layout_row(Rect row, int16_t gap, const std::vector<widgets::Instance>& ite
         const int16_t w = equal_split ? equal_w
                           : items[i].size == widgets::Size::kFlex
                               ? flex_w
-                              : widgets::size_px(items[i].size);
+                              : widgets::size_px(items[i].size, row.w);
         out[i] = Rect{cursor, row.y, w, row.h};
         cursor = static_cast<int16_t>(cursor + w + gap);
     }
@@ -391,8 +403,14 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
     canvas.fill(Color::White);
     draw_header(canvas, device);
 
-    Rect body{MARGIN, BODY_TOP, static_cast<int16_t>(canvas.width() - 2 * MARGIN),
-              static_cast<int16_t>(canvas.height() - BODY_TOP - MARGIN)};
+    const int16_t margin = (canvas.width() == 800) ? 15 : static_cast<int16_t>((canvas.width() * 15 + 400) / 800);
+    const int16_t body_top = (canvas.height() == 600) ? 63 : static_cast<int16_t>((canvas.height() * 63 + 300) / 600);
+    const int16_t row_gap = (canvas.height() == 600) ? 12 : static_cast<int16_t>((canvas.height() * 12 + 300) / 600);
+    const int16_t top_gap = (canvas.width() == 800) ? 19 : static_cast<int16_t>((canvas.width() * 19 + 400) / 800);
+    const int16_t bottom_gap = (canvas.width() == 800) ? 17 : static_cast<int16_t>((canvas.width() * 17 + 400) / 800);
+
+    Rect body{margin, body_top, static_cast<int16_t>(canvas.width() - 2 * margin),
+              static_cast<int16_t>(canvas.height() - body_top - margin)};
 
     // Видимость каждого инстанса — по его widgets::Spec::visible: раскладка
     // не знает имён слотов, только у кого спросить.
@@ -425,36 +443,42 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
             draw_setup(canvas, device, device.setup_url);
             return;
         }
-        // Устройство настроено, но данных пока нет (например, подключение к Wi-Fi при загрузке)
+        // Устройство настроено, но данных пока нет
         const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
-        const char* msg = is_ru ? "Подключение к сети · Ожидание данных..."
-                                : "Connecting to network · Waiting for data...";
+        const char* msg = (device.wifi_rssi == 0)
+                              ? (is_ru ? "Подключите PocketBook к сети Wi-Fi" : "Connect PocketBook to Wi-Fi network")
+                              : (is_ru ? "Подключение к сети · Ожидание данных..." : "Connecting to network · Waiting for data...");
         int16_t mw = text_width(fonts::Terminus20, msg);
         int16_t mx = static_cast<int16_t>((canvas.width() - mw) / 2);
         int16_t my = static_cast<int16_t>(body.y + body.h / 2);
         draw_text(canvas, fonts::Terminus20, mx, my, msg, Color::Black, 1, /*bold=*/true);
+        if (device.wifi_rssi == 0) {
+            const char* sub = is_ru ? "Включите Wi-Fi в настройках PocketBook и выберите сеть"
+                                    : "Enable Wi-Fi in PocketBook Settings and join a network";
+            int16_t sw = text_width(fonts::Terminus16, sub);
+            draw_text(canvas, fonts::Terminus16, static_cast<int16_t>((canvas.width() - sw) / 2),
+                      static_cast<int16_t>(my + 28), sub, Color::Black);
+        }
         return;
     }
 
     Rect row1, row2;
-    compute_two_rows(body, ROW_GAP, row_has[0], row_has[1], &row1, &row2);
+    compute_two_rows(body, row_gap, row_has[0], row_has[1], &row1, &row2);
 
     if (row_has[0] && row_has[1]) {
-        // Разделитель садится на границу рядов, а не в середину зазора — в
-        // эталоне зазор целиком идёт ПОСЛЕ линии (298→310 у div, а не по 6px
-        // с обеих сторон).
-        const int16_t rule_w = static_cast<int16_t>(canvas.width() - 2 * MARGIN);
-        canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h), rule_w, Color::Black);
-        canvas.hline(MARGIN, static_cast<int16_t>(row1.y + row1.h + 1), rule_w, Color::Black);
+        // Разделитель садится на границу рядов, а не в середину зазора
+        const int16_t rule_w = static_cast<int16_t>(canvas.width() - 2 * margin);
+        canvas.hline(margin, static_cast<int16_t>(row1.y + row1.h), rule_w, Color::Black);
+        canvas.hline(margin, static_cast<int16_t>(row1.y + row1.h + 1), rule_w, Color::Black);
     }
 
-    const int16_t row_gap[2] = {TOP_GAP, BOTTOM_GAP};
+    const int16_t row_gap_pair[2] = {top_gap, bottom_gap};
     const Rect rows[2] = {row1, row2};
     for (int r = 0; r < 2; ++r) {
         if (!row_has[r]) continue;
         const std::vector<widgets::Instance>& items = dashboard.rows[r];
         std::vector<Rect> rects(items.size());
-        layout_row(rows[r], row_gap[r], items, visible[r], rects.data());
+        layout_row(rows[r], row_gap_pair[r], items, visible[r], rects.data());
 
         bool drawn_any = false;
         for (size_t i = 0; i < items.size(); ++i) {
@@ -464,8 +488,8 @@ void draw_frame(Canvas& canvas, const Store& store, const DeviceInfo& device,
                 // Вертикальная линия 2px в зазоре слева от виджета — тот же
                 // приём, что раньше был жёстко зашит для Сегодня (два
                 // соседних vline вместо толщины линии в canvas).
-                const int16_t x2 = static_cast<int16_t>(rects[i].x - row_gap[r] + 2);
-                const int16_t x1 = static_cast<int16_t>(rects[i].x - row_gap[r] + 1);
+                const int16_t x2 = static_cast<int16_t>(rects[i].x - row_gap_pair[r] + 2);
+                const int16_t x1 = static_cast<int16_t>(rects[i].x - row_gap_pair[r] + 1);
                 canvas.vline(x2, rows[r].y, rows[r].h, Color::Black);
                 canvas.vline(x1, rows[r].y, rows[r].h, Color::Black);
             }
@@ -515,7 +539,7 @@ void draw_boot(Canvas& canvas, const char* status) {
     // Имя — Terminus24 при scale=2, как пароль точки доступа: у PlexMono букв
     // нет (только цифры и знаки), а второго крупного шрифта с латиницей мы
     // намеренно не заводили (font.h).
-    const char* name = "tablo";
+    const char* name = "pb-tablo";
     const int16_t name_w = static_cast<int16_t>(text_width(fonts::Terminus24, name) * 2);
     draw_text(canvas, fonts::Terminus24, static_cast<int16_t>(cx - name_w / 2), 228, name,
               Color::Black, 2, /*bold=*/true);
@@ -602,15 +626,48 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     draw_header(canvas, device, /*show_setup_url=*/false);
 
     const bool is_ru = (i18n::lang() == i18n::Lang::kRu);
-    String url = setup_url.length() > 0 ? setup_url : String("http://pbtablo-setup.local:8080");
 
-    // 1. Сверху по центру адрес
-    const int16_t url_w = text_width(fonts::Terminus24, url.c_str());
+    if (device.wifi_rssi == 0) {
+        // Устройство не подключено к Wi-Fi
+        const char* title = is_ru ? "Подключите PocketBook к сети Wi-Fi"
+                                  : "Connect PocketBook to Wi-Fi network";
+        const int16_t tw = text_width(fonts::Terminus24, title);
+        const int16_t tx = static_cast<int16_t>((canvas.width() - tw) / 2);
+        draw_text(canvas, fonts::Terminus24, tx, 250, title, Color::Black, 1, /*bold=*/true);
+        draw_text(canvas, fonts::Terminus24, tx, 251, title, Color::Black, 1, /*bold=*/true);
+
+        const char* sub1 = is_ru ? "Включите Wi-Fi в настройках PocketBook и выберите сеть."
+                                 : "Enable Wi-Fi in PocketBook Settings and join a network.";
+        const int16_t s1w = text_width(fonts::Terminus16, sub1);
+        draw_text(canvas, fonts::Terminus16, static_cast<int16_t>((canvas.width() - s1w) / 2), 300,
+                  sub1, Color::Black, 1, false);
+
+        const char* sub2 = is_ru ? "После подключения здесь появится адрес настройки."
+                                 : "Once connected, the setup address will appear here.";
+        const int16_t s2w = text_width(fonts::Terminus16, sub2);
+        draw_text(canvas, fonts::Terminus16, static_cast<int16_t>((canvas.width() - s2w) / 2), 330,
+                  sub2, Color::Black, 1, false);
+        return;
+    }
+
+    String url = setup_url.length() > 0 ? setup_url : String("http://pb-tablo.local:8080");
+
+    // Для визуального отображения убираем http://
+    std::string display_url(url.c_str());
+    if (display_url.rfind("http://", 0) == 0) {
+        display_url = display_url.substr(7);
+    } else if (display_url.rfind("https://", 0) == 0) {
+        display_url = display_url.substr(8);
+    }
+
+    // 1. Сверху по центру адрес без http://, двойной жирный штрих (Terminus 24)
+    const int16_t url_w = text_width(fonts::Terminus24, display_url.c_str());
     const int16_t url_x = static_cast<int16_t>((canvas.width() - url_w) / 2);
     const int16_t url_y = 105;
-    draw_text(canvas, fonts::Terminus24, url_x, url_y, url.c_str(), Color::Black, 1, /*bold=*/true);
+    draw_text(canvas, fonts::Terminus24, url_x, url_y, display_url.c_str(), Color::Black, 1, /*bold=*/true);
+    draw_text(canvas, fonts::Terminus24, url_x, static_cast<int16_t>(url_y + 1), display_url.c_str(), Color::Black, 1, /*bold=*/true);
 
-    // 2. Ниже по центру большой QR-код
+    // 2. Ниже по центру большой QR-код (QR кодирует полный url с http:// для телефонов)
     constexpr uint8_t kModulePx = 7;
     constexpr uint8_t kQuietModules = 4;
     const int16_t qr_side = wifi_qr::side_for(kModulePx, kQuietModules);  // 343px
@@ -622,10 +679,10 @@ void draw_setup(Canvas& canvas, const DeviceInfo& device, const String& setup_ur
     // 3. Внизу экрана пояснение
     const char* hint = is_ru ? "Откройте адрес в браузере или отсканируйте QR-код"
                              : "Open the address in your browser or scan the QR code";
-    const int16_t hint_w = text_width(fonts::Terminus14, hint);
+    const int16_t hint_w = text_width(fonts::Terminus16, hint);
     const int16_t hint_x = static_cast<int16_t>((canvas.width() - hint_w) / 2);
     const int16_t hint_y = static_cast<int16_t>(canvas.height() - 40);
-    draw_text(canvas, fonts::Terminus14, hint_x, hint_y, hint, Color::Black, 1, false);
+    draw_text(canvas, fonts::Terminus16, hint_x, hint_y, hint, Color::Black, 1, /*bold=*/true);
 }
 
 }  // namespace layout

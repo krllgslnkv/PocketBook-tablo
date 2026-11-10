@@ -234,21 +234,21 @@ int16_t draw_inverse_label(Canvas& c, int16_t x, int16_t baseline_y, const char*
 // (спокойное состояние не нуждается в акценте).
 void draw_state_tag(Canvas& c, int16_t right_x, int16_t baseline_y, const char* label, bool alarm,
                     bool quiet) {
-    int16_t tw = text_width(fonts::Terminus16, label);
+    int16_t tw = text_width(fonts::Terminus20, label);
     if (alarm) {
         constexpr int16_t kPadX = 6;
         int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
         int16_t x = static_cast<int16_t>(right_x - plate_w);
-        c.fill_rect(x, static_cast<int16_t>(baseline_y - 14), plate_w, 18, Color::Black);
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(x + kPadX), baseline_y, label,
+        c.fill_rect(x, static_cast<int16_t>(baseline_y - 17), plate_w, 22, Color::Black);
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(x + kPadX), baseline_y, label,
                   Color::White, 1, /*bold=*/true);
     } else {
         (void) quiet;
         constexpr int16_t kPadX = 6;
         int16_t plate_w = static_cast<int16_t>(tw + 2 * kPadX);
         int16_t x = static_cast<int16_t>(right_x - plate_w);
-        c.rect(x, static_cast<int16_t>(baseline_y - 14), plate_w, 18, Color::Black);
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(x + kPadX), baseline_y, label,
+        c.rect(x, static_cast<int16_t>(baseline_y - 17), plate_w, 22, Color::Black);
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(x + kPadX), baseline_y, label,
                   Color::Black, 1, /*bold=*/true);
     }
 }
@@ -298,8 +298,8 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
 
     if (layout::has_data(s) && s->delta != 0.0f) {
         String delta = format_delta_per_hour(s->delta);
-        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(area.x + area.w - dw), baseline,
+        int16_t dw = text_width(fonts::Terminus20, delta.c_str());
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(area.x + area.w - dw), baseline,
                   delta.c_str(), Color::Black, 1, /*bold=*/true);
     }
 
@@ -313,14 +313,14 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     bool quiet = !alarm && ((is_quiet != nullptr) ? is_quiet(s->number) : true);
     const char* state = alarm ? i18n::tr(i18n::Str::kVentilate) : (quiet ? i18n::tr(i18n::Str::kFresh) : i18n::tr(i18n::Str::kNormal));
 
-    const int16_t tag_w = static_cast<int16_t>(text_width(fonts::Terminus16, state) + 12);
+    const int16_t tag_w = static_cast<int16_t>(text_width(fonts::Terminus20, state) + 12);
     const int16_t spark_w = static_cast<int16_t>(area.w - tag_w - 8);
     if (spark_w > 20) {
         draw_sparkline(c, Rect{area.x, spark_top, spark_w, kSparkH}, spark, n);
     }
 
     draw_state_tag(c, static_cast<int16_t>(area.x + area.w),
-                   static_cast<int16_t>(spark_top + kSparkH + 4), state, alarm, quiet);
+                   static_cast<int16_t>(spark_top + kSparkH + 5), state, alarm, quiet);
 }
 
 // Текст причины отказа для строки лимита: слот `<id>.status` с ok=false и
@@ -429,8 +429,8 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             draw_text(c, fonts::Terminus20, r.x, title_baseline, "Claude", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.claude.reset");
             if (layout::has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus16, reset->text.c_str());
-                draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - rw),
+                int16_t rw = text_width(fonts::Terminus20, reset->text.c_str());
+                draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - rw),
                           title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
@@ -451,21 +451,21 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             draw_text(c, fonts::Terminus20, r.x, title_baseline, "GPT", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.codex.reset");
             if (layout::has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus16, reset->text.c_str());
-                draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - rw),
+                int16_t rw = text_width(fonts::Terminus20, reset->text.c_str());
+                draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - rw),
                           title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
             String pct = layout::format_percent(codex, d.now);
-            int16_t pw = text_width(fonts::PlexMono25, pct.c_str());
+            int16_t pw = text_width(fonts::PlexMono28, pct.c_str());
             int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
             if (bar_w > 0) {
-                draw_segbar(c, Rect{r.x, bar_y, bar_w, 16}, 100.0f - codex->number,
+                draw_segbar(c, Rect{r.x, bar_y, bar_w, 18}, 100.0f - codex->number,
                             layout::segments_for_width(bar_w));
             }
-            draw_text(c, fonts::PlexMono25, static_cast<int16_t>(r.x + r.w - pw),
-                      static_cast<int16_t>(bar_y + 15), pct.c_str(), Color::Black);
-            cursor = static_cast<int16_t>(bar_y + 16);
+            draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - pw),
+                      static_cast<int16_t>(bar_y + 16), pct.c_str(), Color::Black);
+            cursor = static_cast<int16_t>(bar_y + 18);
         }
 
         if (antigravity_error) {
@@ -477,8 +477,8 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             draw_text(c, fonts::Terminus20, r.x, title_baseline, "Antigravity", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.antigravity.reset");
             if (layout::has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus16, reset->text.c_str());
-                draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - rw),
+                int16_t rw = text_width(fonts::Terminus20, reset->text.c_str());
+                draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - rw),
                           title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
@@ -491,15 +491,15 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
                 cursor = static_cast<int16_t>(bar_y + 16);
             } else if (antigravity_5h != nullptr && layout::has_data(antigravity_5h)) {
                 String pct = layout::format_percent(antigravity_5h, d.now);
-                int16_t pw = text_width(fonts::PlexMono25, pct.c_str());
+                int16_t pw = text_width(fonts::PlexMono28, pct.c_str());
                 int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
                 if (bar_w > 0) {
-                    draw_segbar(c, Rect{r.x, bar_y, bar_w, 16}, 100.0f - antigravity_5h->number,
+                    draw_segbar(c, Rect{r.x, bar_y, bar_w, 18}, 100.0f - antigravity_5h->number,
                                 layout::segments_for_width(bar_w));
                 }
-                draw_text(c, fonts::PlexMono25, static_cast<int16_t>(r.x + r.w - pw),
-                          static_cast<int16_t>(bar_y + 15), pct.c_str(), Color::Black);
-                cursor = static_cast<int16_t>(bar_y + 16);
+                draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - pw),
+                          static_cast<int16_t>(bar_y + 16), pct.c_str(), Color::Black);
+                cursor = static_cast<int16_t>(bar_y + 18);
             }
         }
 
@@ -532,7 +532,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             int16_t half = static_cast<int16_t>((r.w - 20) / 2);
             draw_air_metric(c, Rect{r.x, area_y, half, area_h}, "CO₂", "ppm", co2, d.now,
                             co2_alarm, co2_quiet);
-            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 53, Color::Black);
+            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 74, Color::Black);
             draw_air_metric(c, Rect{static_cast<int16_t>(r.x + half + 20), area_y, half, area_h},
                             "TVOC", "ppb", tvoc, d.now, tvoc_alarm, tvoc_quiet);
         } else if (has_co2) {
@@ -547,7 +547,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             int16_t half = static_cast<int16_t>((r.w - 20) / 2);
             draw_air_metric(c, Rect{r.x, area_y, half, area_h}, temp_label, "°C", temp, d.now,
                             temp_alarm, temp_quiet, 1);
-            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 66, Color::Black);
+            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 74, Color::Black);
             draw_air_metric(c, Rect{static_cast<int16_t>(r.x + half + 20), area_y, half, area_h},
                             hum_label, "%", hum, d.now, hum_alarm, hum_quiet, 0);
         } else if (has_temp) {

@@ -5,10 +5,12 @@
 
 #include "../assets/plexmono_14.h"
 #include "../assets/plexmono_16.h"
+#include "../assets/plexmono_20.h"
 #include "../assets/plexmono_28.h"
 #include "../assets/plexmono_41.h"
 #include "../assets/terminus_14.h"
 #include "../assets/terminus_16.h"
+#include "../assets/terminus_20.h"
 #include "prims.h"
 #include "../i18n.h"
 
@@ -60,10 +62,10 @@ void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const 
 
         const Slot* summary = store.find("weather.summary");
         if (layout::has_data(summary)) {
-            String label = prims::truncate_to_width(fonts::Terminus16, summary->text.c_str(), r.w);
-            draw_text(c, fonts::Terminus16, r.x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
+            String label = prims::truncate_to_width(fonts::Terminus20, summary->text.c_str(), r.w);
+            draw_text(c, fonts::Terminus20, r.x, y, label.c_str(), Color::Black, 1, /*bold=*/true);
         }
-        y = static_cast<int16_t>(y + 30);
+        y = static_cast<int16_t>(y + 32);
     }
 
     for (int i = 1; i <= 3; ++i) {
@@ -76,13 +78,13 @@ void today_draw(Canvas& c, const Store& store, const DeviceInfo&, Rect r, const 
         if (y > r.y + r.h) break;
 
         if (layout::has_data(at)) {
-            draw_text(c, fonts::PlexMono16, r.x, y, at->text.c_str(), Color::Black);
+            draw_text(c, fonts::PlexMono20, r.x, y, at->text.c_str(), Color::Black);
         }
-        String label = prims::truncate_to_width(fonts::Terminus16, title->text.c_str(),
-                                                 static_cast<int16_t>(r.w - 60));
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + 60), y, label.c_str(),
+        String label = prims::truncate_to_width(fonts::Terminus20, title->text.c_str(),
+                                                 static_cast<int16_t>(r.w - 70));
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + 70), y, label.c_str(),
                   Color::Black, 1, /*bold=*/true);
-        y = static_cast<int16_t>(y + 24);
+        y = static_cast<int16_t>(y + 26);
     }
 }
 

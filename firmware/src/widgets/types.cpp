@@ -4,12 +4,13 @@
 
 namespace widgets {
 
-int16_t size_px(Size size) {
+int16_t size_px(Size size, int16_t row_width) {
+    if (row_width <= 0) row_width = 770;
     switch (size) {
         case Size::kS:
-            return 202;  // «Сегодня» в эталоне
+            return static_cast<int16_t>((row_width * 202 + 385) / 770);  // «Сегодня» в эталоне
         case Size::kM:
-            return 296;  // «Рынки» в эталоне
+            return static_cast<int16_t>((row_width * 296 + 385) / 770);  // «Рынки» в эталоне
         case Size::kFlex:
         default:
             return 0;

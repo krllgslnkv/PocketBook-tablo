@@ -62,8 +62,8 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
         draw_text(c, fonts::Terminus20, r.x, label_baseline, "BTC / USD", Color::Black, 1, /*bold=*/true);
 
         String delta = prims::format_delta(btc->delta);
-        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
+        int16_t dw = text_width(fonts::Terminus20, delta.c_str());
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - dw), label_baseline,
                   delta.c_str(), Color::Black, 1, /*bold=*/true);
         const char* period = i18n::tr(i18n::Str::kLast24h);
         int16_t pw = text_width(fonts::Terminus16, period);
@@ -97,13 +97,13 @@ void markets_draw(Canvas& c, const Store& store, const DeviceInfo& d, Rect r, co
         draw_text(c, fonts::Terminus20, r.x, y, p.label, Color::Black, 1, /*bold=*/true);
 
         String delta = prims::format_delta(p.slot->delta);
-        int16_t dw = text_width(fonts::Terminus16, delta.c_str());
-        draw_text(c, fonts::Terminus16, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
+        int16_t dw = text_width(fonts::Terminus20, delta.c_str());
+        draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - dw), y, delta.c_str(),
                   Color::Black, 1, /*bold=*/true);
 
         String val = layout::format_value(p.slot, d.now, 2, "");
         int16_t vw = text_width(fonts::PlexMono28, val.c_str());
-        draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - dw - vw - 12), y,
+        draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - dw - vw - 14), y,
                   val.c_str(), Color::Black);
         y = static_cast<int16_t>(y + 38);
     }

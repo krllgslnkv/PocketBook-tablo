@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>tablo — setup</title>
+<title>pb-tablo — setup</title>
 <style>
   :root {
     color-scheme: light;
@@ -80,7 +80,7 @@
     font-size: 13px;
     flex-shrink: 0;
   }
-  button {
+  button, .btn {
     font: inherit;
     border-radius: 10px;
     border: 1px solid var(--accent);
@@ -89,24 +89,30 @@
     padding: 12px 16px;
     min-height: 44px;
     cursor: pointer;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    text-decoration: none;
   }
-  button.secondary {
+  button.secondary, .btn.secondary {
     background: transparent;
     color: var(--accent);
   }
-  button.small {
+  button.small, .btn.small {
     padding: 6px 10px;
     min-height: 32px;
     font-size: 13px;
   }
-  button.danger {
+  button.danger, .btn.danger {
     background: transparent;
     border-color: var(--danger);
     color: var(--danger);
   }
-  button:disabled { opacity: 0.4; cursor: default; }
-  button:active { opacity: 0.75; }
-  button.full { width: 100%; margin-top: 4px; }
+  button:disabled, .btn:disabled { opacity: 0.4; cursor: default; }
+  button:active, .btn:active { opacity: 0.75; }
+  button.full, .btn.full { width: 100%; margin-top: 4px; }
   input, select {
     font: inherit;
     width: 100%;
@@ -167,11 +173,12 @@
     border-top: 1px solid var(--border);
     padding: 12px 16px;
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     max-width: 480px;
     margin: 0 auto;
   }
-  footer button { flex: 1; }
+  footer button, footer .btn { flex: 1; min-width: 0; padding: 10px 8px; font-size: 14px; }
   #status {
     position: fixed;
     left: 16px;
@@ -233,7 +240,7 @@
 </head>
 <body>
 <header>
-  <h1>tablo</h1>
+  <h1>pb-tablo</h1>
   <p data-i18n="header.sub">Device setup</p>
 </header>
 
@@ -258,9 +265,18 @@
   <section id="device-section">
     <h2 data-i18n="section.device">Device</h2>
     <label><span data-i18n="device.name">Device name</span>
-      <input id="device-name" type="text" placeholder="pbtablo-setup">
+      <input id="device-name" type="text" placeholder="pb-tablo">
     </label>
     <p class="empty" id="device-name-hint"></p>
+    <label><span data-i18n="device.model">PocketBook Model / Resolution</span>
+      <select id="screen-model">
+        <option value="auto" data-i18n="model.auto">Auto-detect (recommended)</option>
+        <option value="600x800">PocketBook 625 / 624 / 622 (600×800)</option>
+        <option value="758x1024">Touch Lux 3 / 4 / 5, PB 617 (758×1024)</option>
+        <option value="1072x1448">Touch HD 3 / Verse / Verse Pro (1072×1448)</option>
+        <option value="1404x1872">InkPad 3 / InkPad 4 / Color (1404×1872)</option>
+      </select>
+    </label>
     <label><span data-i18n="device.lang">Language</span>
       <select id="lang">
         <option value="en">English</option>
@@ -275,11 +291,9 @@
 <footer>
   <button type="button" id="save-btn" data-i18n="save" disabled>Save</button>
   <button type="button" class="secondary" id="reboot-btn" data-i18n="reboot">Reboot</button>
-  <label class="button secondary" style="cursor:pointer;display:inline-block;padding:8px 14px;border:1px solid #ccc;border-radius:4px;margin-left:8px;font-size:14px;vertical-align:middle;background:#f8f9fa;">
-    <span data-i18n="ota.btn">Update via Wi-Fi</span>
-    <input type="file" id="ota-file-input" accept=".tar.gz,.tgz" style="display:none">
-  </label>
-  <p class="setup-url-footer" style="margin-top:14px;color:#888;font-size:13px;text-align:center;">http://pbtablo-setup.local:8080</p>
+  <button type="button" class="secondary" id="ota-btn" data-i18n="ota.btn">Update via Wi-Fi</button>
+  <input type="file" id="ota-file-input" accept=".tar.gz,.tgz" style="display:none">
+  <p class="setup-url-footer" style="width:100%;margin:4px 0 0;color:var(--muted);font-size:12px;text-align:center;">http://pb-tablo.local:8080</p>
 </footer>
 
 <script>
@@ -289,7 +303,7 @@
 // Пользовательские данные (имена экранов, подписи, сети, город) не переводятся.
 var I18N = {
   en: {
-    'title': 'tablo — setup',
+    'title': 'pb-tablo — setup',
     'header.sub': 'Device setup',
     'section.network': 'Network',
     'section.screens': 'Screens',
@@ -314,6 +328,8 @@ var I18N = {
     'sources.more': 'Advanced',
     'sources.addCustom': '+ Add source',
     'device.name': 'Device name',
+    'device.model': 'PocketBook model / resolution',
+    'model.auto': 'Auto-detect (recommended)',
     'device.lang': 'Language',
     'hint.device.url': 'The page is available at http://{0}.local:8080 from the same network',
     'hint.device.url.with_ip': 'The page is available at http://{0}.local:8080 (or http://{1}:8080) from the same network',
@@ -331,8 +347,16 @@ var I18N = {
     'status.rebooting': 'Rebooting…',
     'reboot.confirm': 'Reboot the device?',
     'ota.btn': 'Update via Wi-Fi',
+    'ota.checking': 'Checking GitHub for updates…',
+    'ota.downloading': 'Downloading update from GitHub…',
     'ota.uploading': 'Uploading update…',
     'ota.restarting': 'Update installed! Restarting…',
+    'ota.updateFound': 'Update {0} is available (current: {1}).',
+    'ota.confirmInstall': 'Install update now from GitHub?',
+    'ota.alreadyLatest': 'You already have the latest version ({0}).',
+    'ota.askReinstall': 'Reinstall from GitHub? (Cancel to select file manually)',
+    'ota.askManual': 'Select update archive file manually from your computer?',
+    'ota.confirmFile': 'Install update from {0}?',
     'slot.btc': 'BTC rate',
     'slot.usd_rub': 'US dollar',
     'slot.eur_rub': 'Euro',
@@ -368,7 +392,7 @@ var I18N = {
     'dash.unsupported': 'Firmware has no screens support',
     'dash.defaultName': 'Screen {0}',
     'dash.name': 'Screen name',
-    'dash.active': 'Active screen (switched with the board buttons)',
+    'dash.active': 'Active screen',
     'dash.row.top': 'Top row',
     'dash.row.bottom': 'Bottom row',
     'preview.unnamed': 'Untitled',
@@ -414,7 +438,7 @@ var I18N = {
     'custom.remove': 'Remove source'
   },
   ru: {
-    'title': 'tablo — настройка',
+    'title': 'pb-tablo — настройка',
     'header.sub': 'настройка устройства',
     'section.network': 'Сеть',
     'section.screens': 'Экраны',
@@ -439,6 +463,8 @@ var I18N = {
     'sources.more': 'дополнительно',
     'sources.addCustom': '+ добавить источник',
     'device.name': 'Имя устройства',
+    'device.model': 'Модель экрана PocketBook',
+    'model.auto': 'Автоопределение (рекомендуется)',
     'device.lang': 'Язык',
     'hint.device.url': 'страница доступна как http://{0}.local:8080 из той же сети',
     'hint.device.url.with_ip': 'страница доступна как http://{0}.local:8080 (или http://{1}:8080) из той же сети',
@@ -456,8 +482,16 @@ var I18N = {
     'status.rebooting': 'перезагружаем…',
     'reboot.confirm': 'Перезагрузить устройство?',
     'ota.btn': 'Обновить по Wi-Fi',
+    'ota.checking': 'Проверяем обновления на GitHub…',
+    'ota.downloading': 'Скачиваем обновление с GitHub…',
     'ota.uploading': 'Загружаем обновление…',
     'ota.restarting': 'Обновление установлено! Перезапуск…',
+    'ota.updateFound': 'Доступно обновление {0} (текущая версия: {1}).',
+    'ota.confirmInstall': 'Установить обновление сейчас с GitHub?',
+    'ota.alreadyLatest': 'У вас уже установлена последняя версия ({0}).',
+    'ota.askReinstall': 'Переустановить с GitHub? (Отмена — выбрать файл вручную)',
+    'ota.askManual': 'Выбрать архив обновления вручную с компьютера?',
+    'ota.confirmFile': 'Установить обновление из файла {0}?',
     'slot.btc': 'Курс BTC',
     'slot.usd_rub': 'Доллар',
     'slot.eur_rub': 'Евро',
@@ -493,7 +527,7 @@ var I18N = {
     'dash.unsupported': 'прошивка без поддержки экранов',
     'dash.defaultName': 'Экран {0}',
     'dash.name': 'Имя экрана',
-    'dash.active': 'Активный экран (переключается кнопками на плате)',
+    'dash.active': 'Активный экран',
     'dash.row.top': 'Верхний ряд',
     'dash.row.bottom': 'Нижний ряд',
     'preview.unnamed': 'без имени',
@@ -786,7 +820,7 @@ function updateCityHint() {
 }
 
 function updateDeviceNameHint(name) {
-  var devName = name || 'pbtablo-setup';
+  var devName = name || 'pb-tablo';
   var hintEl = document.getElementById('device-name-hint');
   var ip = (state.status && state.status.ip) ? state.status.ip : (window.location.hostname.match(/^\d+\.\d+\.\d+\.\d+$/) ? window.location.hostname : '');
   if (hintEl) {
@@ -804,9 +838,10 @@ function updateDeviceNameHint(name) {
 
 // ── Экраны: токены размеров, каталог виджетов, дашборды ──
 
-function widgetPxWidth(size) {
-  if (size === 'S') return 202;
-  if (size === 'M') return 296;
+function widgetPxWidth(size, rowWidth) {
+  var base = rowWidth || 770;
+  if (size === 'S') return Math.round((base * 202) / 770);
+  if (size === 'M') return Math.round((base * 296) / 770);
   return 0;  // flex — без фиксированной ширины
 }
 
@@ -1049,7 +1084,23 @@ function renderDashboards() {
   drawPreview();
 }
 
-// ── предпросмотр: canvas 800×480, то же правило ряда, что у прошивки ──
+// ── предпросмотр: адаптивный холст под разрешение экрана ──
+
+function updateCanvasResolution(model) {
+  var canvas = el('preview-canvas');
+  if (!canvas) return;
+  var dims = {
+    '600x800': [800, 600],
+    '758x1024': [1024, 758],
+    '1072x1448': [1448, 1072],
+    '1404x1872': [1872, 1404]
+  };
+  var target = dims[model] || [800, 600];
+  if (canvas.width !== target[0] || canvas.height !== target[1]) {
+    canvas.width = target[0];
+    canvas.height = target[1];
+  }
+}
 
 function drawWidgetBox(ctx, x, y, w, h, inst) {
   var configured = isInstanceConfigured(inst);
@@ -1061,12 +1112,13 @@ function drawWidgetBox(ctx, x, y, w, h, inst) {
   ctx.fillRect(x, y, w, h);
   if (!configured) fillHatch(ctx, x, y, w, h);
   ctx.fillStyle = '#1a1a17';
-  ctx.font = '600 13px -apple-system, sans-serif';
+  var scale = ctx.canvas.width / 800;
+  ctx.font = '600 ' + Math.max(12, Math.round(13 * scale)) + 'px -apple-system, sans-serif';
   ctx.textBaseline = 'top';
-  ctx.fillText(widgetTitle(inst), x + 6, y + 6);
+  ctx.fillText(widgetTitle(inst), x + Math.round(6 * scale), y + Math.round(6 * scale));
   ctx.restore();
   ctx.strokeStyle = '#dcdad2';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = Math.max(1, Math.round(scale));
   ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
 }
 
@@ -1075,7 +1127,7 @@ function drawWidgetBox(ctx, x, y, w, h, inst) {
 function fillHatch(ctx, x, y, w, h) {
   ctx.strokeStyle = '#dcdad2';
   ctx.lineWidth = 1;
-  var step = 10;
+  var step = Math.max(8, Math.round(10 * (ctx.canvas.width / 800)));
   for (var d = -h; d < w; d += step) {
     ctx.beginPath();
     ctx.moveTo(x + d, y + h);
@@ -1093,14 +1145,11 @@ function drawPreviewRow(ctx, row, left, right, y0, y1, gap) {
   row.forEach(function (w) { if (w.size === 'flex') flexCount++; });
   var widths;
   var fixedSum = 0;
-  row.forEach(function (w) { if (w.size !== 'flex') fixedSum += widgetPxWidth(w.size); });
-  // Переполнение ряда (например три M) — прошивка делит ряд поровну между
-  // видимыми (layout.cpp, layout_row); предпросмотр повторяет то же правило,
-  // а не подгоняет картинку клампом, которого на устройстве нет.
-  var overflow = fixedSum + flexCount * 120 > avail;
+  row.forEach(function (w) { if (w.size !== 'flex') fixedSum += widgetPxWidth(w.size, totalW); });
+  var overflow = fixedSum + flexCount * Math.round(totalW * 120 / 770) > avail;
   if (flexCount > 0 && !overflow) {
     var flexW = (avail - fixedSum) / flexCount;
-    widths = row.map(function (w) { return w.size === 'flex' ? flexW : widgetPxWidth(w.size); });
+    widths = row.map(function (w) { return w.size === 'flex' ? flexW : widgetPxWidth(w.size, totalW); });
   } else {
     var each = avail / n;
     widths = row.map(function () { return each; });
@@ -1110,7 +1159,7 @@ function drawPreviewRow(ctx, row, left, right, y0, y1, gap) {
     if (i > 0 && w.divider) {
       var lineX = x - gap / 2;
       ctx.fillStyle = '#dcdad2';
-      ctx.fillRect(lineX - 1, y0, 2, y1 - y0);
+      ctx.fillRect(lineX - 1, y0, Math.max(2, Math.round(ctx.canvas.width / 400)), y1 - y0);
     }
     drawWidgetBox(ctx, x, y0, widths[i], y1 - y0, w);
     x += widths[i] + gap;
@@ -1126,13 +1175,14 @@ function drawPreview() {
   ctx.fillStyle = '#f4f3ef';
   ctx.fillRect(0, 0, W, H);
 
-  var headerH = 40, margin = 12, gap = 12, lineW = 2;
+  var scaleX = W / 800, scaleY = H / 600;
+  var headerH = Math.round(40 * scaleY), margin = Math.round(12 * scaleX), gap = Math.round(12 * scaleX), lineW = Math.max(2, Math.round(2 * scaleY));
   ctx.fillStyle = '#1a1a17';
   ctx.fillRect(0, 0, W, headerH);
 
   var dash = currentDashboard();
   ctx.fillStyle = '#ffffff';
-  ctx.font = '600 18px -apple-system, sans-serif';
+  ctx.font = '600 ' + Math.max(14, Math.round(18 * scaleY)) + 'px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
   ctx.fillText(dash ? (dash.name || t('preview.unnamed')) : t('preview.nodata'), margin, headerH / 2);
 
@@ -1541,6 +1591,9 @@ function loadConfig() {
     }
 
     el('device-name').value = state.device_name;
+    state.screen_model = cfg.screen_model || 'auto';
+    if (el('screen-model')) el('screen-model').value = state.screen_model;
+    updateCanvasResolution(state.screen_model);
     el('lang').value = state.lang;
     state.loaded = true;
     applyLang();
@@ -1636,13 +1689,77 @@ document.addEventListener('click', function (e) {
 
   if (tgt.id === 'save-btn') save();
   if (tgt.id === 'reboot-btn') reboot();
+  if (tgt.id === 'ota-btn') startOtaUpdate();
 });
+
+function startOtaUpdate() {
+  setStatus(t('ota.checking'));
+  fetch('/api/ota/check')
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (!res.ok) {
+        var msg = res.error || 'Failed to check GitHub';
+        if (confirm(msg + '\n\n' + t('ota.askManual'))) {
+          el('ota-file-input').click();
+        } else {
+          setStatus('');
+        }
+        return;
+      }
+
+      if (res.has_update) {
+        var msg = t('ota.updateFound', res.latest_version, res.current_version);
+        if (res.release_name) msg += '\n' + res.release_name;
+        msg += '\n\n' + t('ota.confirmInstall');
+        if (confirm(msg)) {
+          installGithubOta(res.download_url);
+        } else {
+          setStatus('');
+        }
+      } else {
+        var msg = t('ota.alreadyLatest', res.current_version);
+        if (confirm(msg + '\n\n' + t('ota.askReinstall'))) {
+          installGithubOta(res.download_url);
+        } else {
+          setStatus('');
+        }
+      }
+    })
+    .catch(function(err) {
+      if (confirm((err.message || 'Error') + '\n\n' + t('ota.askManual'))) {
+        el('ota-file-input').click();
+      } else {
+        setStatus('');
+      }
+    });
+}
+
+function installGithubOta(downloadUrl) {
+  setStatus(t('ota.downloading'));
+  fetch('/api/ota/github', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: downloadUrl || '' })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(res) {
+      if (res.ok) {
+        setStatus(t('ota.restarting'));
+        setTimeout(function() { location.reload(); }, 6000);
+      } else {
+        setStatus('Error: ' + (res.message || 'Update failed'));
+      }
+    })
+    .catch(function(err) {
+      setStatus('Update failed: ' + err.message);
+    });
+}
 
 document.addEventListener('change', function(e) {
   if (e.target && e.target.id === 'ota-file-input') {
     var file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (!confirm(t('ota.btn') + ' (' + file.name + ')?')) {
+    if (!confirm(t('ota.confirmFile', file.name))) {
       e.target.value = '';
       return;
     }
@@ -1716,6 +1833,13 @@ function handleFieldChange(e) {
     return;
   }
 
+  if (tgt.id === 'screen-model') {
+    state.screen_model = tgt.value;
+    updateCanvasResolution(tgt.value);
+    drawPreview();
+    return;
+  }
+
   if (tgt.id === 'lang') {
     state.lang = tgt.value === 'ru' ? 'ru' : 'en';
     applyLang();
@@ -1751,7 +1875,8 @@ function save() {
   }
   syncInputsToState();
   var payload = {
-    device_name: el('device-name').value || 'pbtablo-setup',
+    device_name: el('device-name').value || 'pb-tablo',
+    screen_model: el('screen-model') ? el('screen-model').value : (state.screen_model || 'auto'),
     timezone_minutes: state.timezone_minutes,
     city: state.city,
     lang: state.lang,

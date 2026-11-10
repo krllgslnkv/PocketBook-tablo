@@ -18,7 +18,7 @@ enum class Size : uint8_t { kS, kM, kFlex };
 
 // kFlex -> 0: раскладка ряда (layout::layout_row) вычисляет фактическую
 // ширину сама, здесь отдавать нечего.
-int16_t size_px(Size size);
+int16_t size_px(Size size, int16_t row_width = 770);
 
 const char* size_to_string(Size size);
 // false — незнакомая строка; size не трогается, вызывающий код (config.cpp)

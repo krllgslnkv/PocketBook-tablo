@@ -10,7 +10,7 @@ echo "==> 1. Compiling C++ Static ARM Renderer (800x600 for PocketBook)..."
 docker run --rm -v "$ROOT":/workspace -w /workspace tablo-builder \
     arm-linux-gnueabi-g++ -static -std=gnu++17 -O2 -DNATIVE_BUILD \
     -Ifirmware/src -Ifirmware/test/test_config \
-    -I.pio/libdeps/native/QRCode/src -I.pio/libdeps/native/ArduinoJson/src \
+    -Ipocketbook/libs/qrcode -Ipocketbook/libs/arduinojson \
     pocketbook/tablo_render.cpp \
     firmware/src/layout.cpp firmware/src/canvas.cpp firmware/src/canvas_mem.cpp \
     firmware/src/font.cpp firmware/src/i18n.cpp firmware/src/slots.cpp \
@@ -20,7 +20,7 @@ docker run --rm -v "$ROOT":/workspace -w /workspace tablo-builder \
     firmware/src/widgets/w_limits_air.cpp firmware/src/widgets/w_mail.cpp \
     firmware/src/widgets/w_today.cpp firmware/src/widgets/w_metric.cpp \
     firmware/src/widgets/w_text.cpp firmware/src/widgets/registry.cpp \
-    .pio/libdeps/native/QRCode/src/qrcode.c \
+    pocketbook/libs/qrcode/qrcode.c \
     -o pocketbook/tablo_render_arm
 
 echo "==> 2. Compiling Go Static ARM Daemon (Web Portal + Connectors)..."
@@ -47,7 +47,7 @@ docker run --rm -v "$ROOT":/workspace -w /workspace tablo-builder \
     qemu-arm-static ./pocketbook/tablo_render_arm \
     -config pocketbook/default_config.json \
     -setup \
-    -setup-url "http://pbtablo-setup.local:8080" \
+    -setup-url "http://pb-tablo.local:8080" \
     -out dist_pb/Photo/tablo_live.png \
     -rot right
 
@@ -57,7 +57,7 @@ echo "==> 5. Creating PocketBook Tablo.app launcher script..."
 cat << 'EOF' > "$DIST/applications/Tablo.app"
 #!/bin/sh
 # ==============================================================================
-# Tablo for PocketBook 625 — Standalone Autonomous Edition with Web Setup Portal
+# Tablo for PocketBook — Standalone Autonomous Edition with Web Setup Portal
 # ==============================================================================
 
 TABLO_DIR="/mnt/ext1/applications/.tablo"
@@ -69,7 +69,7 @@ fi
 IMG="/mnt/ext1/Photo/tablo_live.png"
 LOG="/tmp/tablo.log"
 
-echo "=== TABLO LAUNCH $(date) ===" > "$LOG"
+echo "=== TABLO LAUNCH $(date) ===" >> "$LOG"
 
 # 1. Ensure Photo directory exists
 mkdir -p /mnt/ext1/Photo
@@ -77,34 +77,45 @@ if [ ! -s "$IMG" ] && [ -s "$TABLO_DIR/tablo_live.png" ]; then
     cp "$TABLO_DIR/tablo_live.png" "$IMG"
 fi
 
-# 2. Stop any existing background daemon before starting fresh
-killall -9 tablo_daemon 2>/dev/null || true
-
-# 3. Ensure Wi-Fi network connection and disable Wi-Fi power saving
-if [ -x /ebrmain/bin/netagent ]; then
-    /ebrmain/bin/netagent wifi on >> "$LOG" 2>&1
-    /ebrmain/bin/netagent net on >> "$LOG" 2>&1
-    /ebrmain/bin/netagent connect >> "$LOG" 2>&1
+# 2. Check if background daemon is already running
+DAEMON_RUNNING=0
+if killall -0 tablo_daemon 2>/dev/null || pidof tablo_daemon >/dev/null 2>&1; then
+    DAEMON_RUNNING=1
 fi
-if [ -x /ebrmain/bin/netconnect ]; then
-    /ebrmain/bin/netconnect >> "$LOG" 2>&1
+
+# 3. Start background daemon only if not already running
+if [ "$DAEMON_RUNNING" -eq 0 ]; then
+    echo "Starting autonomous background daemon..." >> "$LOG"
+    if [ -x /ebrmain/bin/netagent ]; then
+        /ebrmain/bin/netagent wifi on >> "$LOG" 2>&1
+        /ebrmain/bin/netagent net on >> "$LOG" 2>&1
+        /ebrmain/bin/netagent connect >> "$LOG" 2>&1
+    fi
+    if [ -x /ebrmain/bin/netconnect ]; then
+        /ebrmain/bin/netconnect >> "$LOG" 2>&1
+    fi
+    iwconfig wlan0 power off 2>/dev/null || true
+
+    nohup "$TABLO_DIR/bin/tablo_daemon" \
+        -port 8080 \
+        -config "$CONFIG" \
+        -html "$TABLO_DIR/data/index.html" \
+        -renderer "$TABLO_DIR/bin/tablo_render" \
+        -img "$IMG" \
+        -rot right >> "$LOG" 2>&1 &
 fi
-iwconfig wlan0 power off 2>/dev/null || true
 
-# 4. Start autonomous background daemon with Web Setup Portal on port 8080
-nohup "$TABLO_DIR/bin/tablo_daemon" \
-    -port 8080 \
-    -config "$CONFIG" \
-    -html "$TABLO_DIR/data/index.html" \
-    -renderer "$TABLO_DIR/bin/tablo_render" \
-    -img "$IMG" \
-    -rot right >> "$LOG" 2>&1 &
-
-# 5. Open image viewer immediately (foreground process for PocketBook launcher)
+# 4. Show live dashboard image in picviewer immediately
 if [ -s "$IMG" ]; then
-    killall picviewer.app 2>/dev/null || true
-    usleep 200000
-    /ebrmain/bin/openbook "$IMG" 2>> "$LOG"
+    # Gracefully close previous picviewer if running so BookServer unregisters task cleanly
+    killall -TERM picviewer.app 2>/dev/null || true
+    for i in 1 2 3; do
+        if ! killall -0 picviewer.app 2>/dev/null; then break; fi
+        usleep 80000
+    done
+    killall -9 picviewer.app 2>/dev/null || true
+    usleep 150000
+    /ebrmain/bin/openbook "$IMG" >> "$LOG" 2>&1
 fi
 EOF
 

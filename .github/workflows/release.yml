@@ -3,74 +3,141 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  pocketbook:
+    name: Build PocketBook Release
     runs-on: ubuntu-latest
     env:
       TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ARM cross-compiler and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-arm-linux-gnueabi qemu-user-static zip
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          python-version: "3.11"
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.platformio
-            .pio
-          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
-          restore-keys: |
-            pio-${{ runner.os }}-
-      - run: pip install platformio "esptool<5"
-      - name: Build firmware
-        run: pio run -e xiao-esp32s3
-      - name: Build settings page image
-        run: pio run -e xiao-esp32s3 -t buildfs
-      - name: Assemble binaries
+          go-version: '1.22'
+
+      - name: Build C++ Static ARM Renderer (800x600 for PocketBook)
+        run: |
+          arm-linux-gnueabi-g++ -static -std=gnu++17 -O2 -DNATIVE_BUILD \
+            -Ifirmware/src -Ifirmware/test/test_config \
+            -Ipocketbook/libs/qrcode -Ipocketbook/libs/arduinojson \
+            pocketbook/tablo_render.cpp \
+            firmware/src/layout.cpp firmware/src/canvas.cpp firmware/src/canvas_mem.cpp \
+            firmware/src/font.cpp firmware/src/i18n.cpp firmware/src/slots.cpp \
+            firmware/src/wifi_qr.cpp firmware/src/widgets/types.cpp \
+            firmware/src/widgets/prims.cpp firmware/src/widgets/w_markets.cpp \
+            firmware/src/widgets/w_limits.cpp firmware/src/widgets/w_air.cpp \
+            firmware/src/widgets/w_limits_air.cpp firmware/src/widgets/w_mail.cpp \
+            firmware/src/widgets/w_today.cpp firmware/src/widgets/w_metric.cpp \
+            firmware/src/widgets/w_text.cpp firmware/src/widgets/registry.cpp \
+            pocketbook/libs/qrcode/qrcode.c \
+            -o pocketbook/tablo_render_arm
+
+      - name: Build Go Static ARM Daemon
+        run: |
+          cd pocketbook/daemon
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o ../tablo_daemon_arm main.go
+
+      - name: Package PocketBook Distribution and OTA Archive
         run: |
           set -euo pipefail
-          B=.pio/build/xiao-esp32s3
-          BOOT_APP0=~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin
-          mkdir -p dist
-          # Адреса: partitions.csv (app0 0x10000, littlefs 0x630000) и стандарт ESP32-S3.
-          esptool.py --chip esp32s3 merge_bin -o "dist/tablo-${TAG}-full.bin" \
-            --flash_mode qio --flash_size 8MB \
-            0x0 "$B/bootloader.bin" \
-            0x8000 "$B/partitions.bin" \
-            0xe000 "$BOOT_APP0" \
-            0x10000 "$B/firmware.bin" \
-            0x630000 "$B/littlefs.bin"
-          cp "$B/firmware.bin" "dist/tablo-${TAG}-firmware.bin"
-          cp "$B/littlefs.bin" "dist/tablo-${TAG}-littlefs.bin"
-          cd dist
-          sha256sum tablo-* > SHA256SUMS
-          cat SHA256SUMS
-      - name: Write release notes
-        run: |
-          cat > dist/notes.md <<NOTES
-          ## Flashing
+          DIST="dist_pb"
+          rm -rf "$DIST"
+          mkdir -p "$DIST/applications/.tablo/bin"
+          mkdir -p "$DIST/applications/.tablo/data"
+          mkdir -p "$DIST/Photo"
 
-          One file at address \`0x0\` (bootloader, partitions, firmware and the setup page):
+          cp pocketbook/tablo_render_arm "$DIST/applications/.tablo/bin/tablo_render"
+          cp pocketbook/tablo_daemon_arm "$DIST/applications/.tablo/bin/tablo_daemon"
+          chmod +x "$DIST/applications/.tablo/bin/"*
 
-          \`\`\`
-          esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 tablo-${TAG}-full.bin
-          \`\`\`
+          cp pocketbook/daemon/index.html "$DIST/applications/.tablo/data/index.html"
+          cp pocketbook/default_config.json "$DIST/applications/.tablo/config.json"
+          cp pocketbook/default_config.json "$DIST/tablo_config.json"
 
-          Without a command line: open https://web.esphome.io in Chrome, connect the board, choose \`tablo-${TAG}-full.bin\`.
+          # Render boot / setup image
+          chmod +x ./pocketbook/tablo_render_arm
+          qemu-arm-static ./pocketbook/tablo_render_arm \
+            -config pocketbook/default_config.json \
+            -setup \
+            -setup-url "http://pb-tablo.local:8080" \
+            -out "$DIST/Photo/tablo_live.png" \
+            -rot right
+          cp "$DIST/Photo/tablo_live.png" "$DIST/applications/.tablo/tablo_live.png"
 
-          Separate images: \`tablo-${TAG}-firmware.bin\` (application, \`0x10000\`),
-          \`tablo-${TAG}-littlefs.bin\` (setup page, \`0x630000\`).
-          NOTES
-      - uses: softprops/action-gh-release@v2
+          # Create Tablo.app launcher script
+          cat << 'EOF' > "$DIST/applications/Tablo.app"
+          #!/bin/sh
+          TABLO_DIR="/mnt/ext1/applications/.tablo"
+          CONFIG="/mnt/ext1/tablo_config.json"
+          if [ ! -f "$CONFIG" ]; then
+              CONFIG="$TABLO_DIR/config.json"
+          fi
+          IMG="/mnt/ext1/Photo/tablo_live.png"
+          LOG="/tmp/tablo.log"
+          echo "=== TABLO LAUNCH $(date) ===" >> "$LOG"
+          mkdir -p /mnt/ext1/Photo
+          if [ ! -s "$IMG" ] && [ -s "$TABLO_DIR/tablo_live.png" ]; then
+              cp "$TABLO_DIR/tablo_live.png" "$IMG"
+          fi
+          DAEMON_RUNNING=0
+          if killall -0 tablo_daemon 2>/dev/null || pidof tablo_daemon >/dev/null 2>&1; then
+              DAEMON_RUNNING=1
+          fi
+          if [ "$DAEMON_RUNNING" -eq 0 ]; then
+              echo "Starting autonomous background daemon..." >> "$LOG"
+              if [ -x /ebrmain/bin/netagent ]; then
+                  /ebrmain/bin/netagent wifi on >> "$LOG" 2>&1
+                  /ebrmain/bin/netagent net on >> "$LOG" 2>&1
+                  /ebrmain/bin/netagent connect >> "$LOG" 2>&1
+              fi
+              if [ -x /ebrmain/bin/netconnect ]; then
+                  /ebrmain/bin/netconnect >> "$LOG" 2>&1
+              fi
+              iwconfig wlan0 power off 2>/dev/null || true
+              nohup "$TABLO_DIR/bin/tablo_daemon" \
+                  -port 8080 \
+                  -config "$CONFIG" \
+                  -html "$TABLO_DIR/data/index.html" \
+                  -renderer "$TABLO_DIR/bin/tablo_render" \
+                  -img "$IMG" \
+                  -rot right >> "$LOG" 2>&1 &
+          fi
+          if [ -s "$IMG" ]; then
+              killall -TERM picviewer.app 2>/dev/null || true
+              for i in 1 2 3; do
+                  if ! killall -0 picviewer.app 2>/dev/null; then break; fi
+                  usleep 80000
+              done
+              killall -9 picviewer.app 2>/dev/null || true
+              usleep 150000
+              /ebrmain/bin/openbook "$IMG" >> "$LOG" 2>&1
+          fi
+          EOF
+          chmod +x "$DIST/applications/Tablo.app"
+
+          # 1. OTA update archive (consumed directly by PocketBook over Wi-Fi)
+          (cd "$DIST" && tar -czf update.tar.gz -C applications Tablo.app -C applications/.tablo bin data)
+
+          # 2. Complete ZIP package for manual USB installation
+          (cd "$DIST" && zip -r "PocketBook-tablo-${TAG:-latest}.zip" applications tablo_config.json Photo)
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          body_path: dist/notes.md
           files: |
-            dist/tablo-${{ github.ref_name }}-full.bin
-            dist/tablo-${{ github.ref_name }}-firmware.bin
-            dist/tablo-${{ github.ref_name }}-littlefs.bin
-            dist/SHA256SUMS
+            dist_pb/update.tar.gz
+            dist_pb/PocketBook-tablo-*.zip

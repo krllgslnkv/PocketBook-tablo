@@ -10,6 +10,13 @@
 #include <string>
 #include <vector>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <linux/fb.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
+
 #include "../firmware/src/board.h"
 #include "../firmware/src/canvas_mem.h"
 #include "../firmware/src/config.cpp"
@@ -55,6 +62,37 @@ void rotate_90_left(const canvas::CanvasMemory& src, canvas::CanvasMemory& dst) 
     }
 }
 
+bool auto_detect_screen(int& out_w, int& out_h) {
+#ifndef _WIN32
+    int fb = open("/dev/fb0", O_RDONLY);
+    if (fb >= 0) {
+        struct fb_var_screeninfo vinfo;
+        if (ioctl(fb, FBIOGET_VSCREENINFO, &vinfo) == 0 && vinfo.xres > 0 && vinfo.yres > 0) {
+            close(fb);
+            int rx = static_cast<int>(vinfo.xres);
+            int ry = static_cast<int>(vinfo.yres);
+            out_w = (rx > ry) ? rx : ry;
+            out_h = (rx > ry) ? ry : rx;
+            return true;
+        }
+        close(fb);
+    }
+    std::ifstream vs("/sys/class/graphics/fb0/virtual_size");
+    if (vs.is_open()) {
+        std::string line;
+        if (std::getline(vs, line)) {
+            int x = 0, y = 0;
+            if (sscanf(line.c_str(), "%d,%d", &x, &y) == 2 && x > 0 && y > 0) {
+                out_w = (x > y) ? x : y;
+                out_h = (x > y) ? y : x;
+                return true;
+            }
+        }
+    }
+#endif
+    return false;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -67,6 +105,8 @@ int main(int argc, char** argv) {
     std::string ap_password = "";
     std::string setup_url = "";
     bool force_setup = false;
+    int screen_w = 0;
+    int screen_h = 0;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -78,6 +118,10 @@ int main(int argc, char** argv) {
             out_path = argv[++i];
         } else if (arg == "-rot" && i + 1 < argc) {
             rot_mode = argv[++i];
+        } else if (arg == "-w" && i + 1 < argc) {
+            screen_w = std::atoi(argv[++i]);
+        } else if (arg == "-h" && i + 1 < argc) {
+            screen_h = std::atoi(argv[++i]);
         } else if (arg == "-boot" && i + 1 < argc) {
             boot_status = argv[++i];
         } else if (arg == "-setup-url" && i + 1 < argc) {
@@ -131,7 +175,18 @@ int main(int argc, char** argv) {
 
     i18n::set_lang(i18n::from_code(settings.lang.c_str()));
 
-    canvas::CanvasMemory src_canvas(board::SCREEN_WIDTH, board::SCREEN_HEIGHT);
+    if (screen_w <= 0 || screen_h <= 0) {
+        if (!auto_detect_screen(screen_w, screen_h)) {
+            screen_w = board::SCREEN_WIDTH;   // 800
+            screen_h = board::SCREEN_HEIGHT;  // 600
+        }
+    }
+    // Render in landscape internally
+    if (screen_w < screen_h) {
+        std::swap(screen_w, screen_h);
+    }
+
+    canvas::CanvasMemory src_canvas(screen_w, screen_h);
 
     if (!boot_status.empty()) {
         layout::draw_boot(src_canvas, boot_status.c_str());
@@ -228,11 +283,11 @@ int main(int argc, char** argv) {
 
     bool ok = false;
     if (rot_mode == "right" || rot_mode == "90") {
-        canvas::CanvasMemory dst_canvas(board::SCREEN_HEIGHT, board::SCREEN_WIDTH);
+        canvas::CanvasMemory dst_canvas(screen_h, screen_w);
         rotate_90_right(src_canvas, dst_canvas);
         ok = dst_canvas.save_png(out_path);
     } else if (rot_mode == "left" || rot_mode == "270") {
-        canvas::CanvasMemory dst_canvas(board::SCREEN_HEIGHT, board::SCREEN_WIDTH);
+        canvas::CanvasMemory dst_canvas(screen_h, screen_w);
         rotate_90_left(src_canvas, dst_canvas);
         ok = dst_canvas.save_png(out_path);
     } else {

@@ -39,6 +39,11 @@ var embeddedDefaultConfig []byte
 //go:embed index.html
 var embeddedIndexHTML []byte
 
+const (
+	AppVersion        = "v1.0.0"
+	DefaultGithubRepo = "krllgslnkv/PocketBook-tablo"
+)
+
 // -----------------------------------------------------------------------------
 // Config structures matching firmware/src/config.h and config.cpp
 // -----------------------------------------------------------------------------
@@ -91,6 +96,7 @@ type Network struct {
 type Settings struct {
 	Configured      bool        `json:"configured"`
 	DeviceName      string      `json:"device_name"`
+	ScreenModel     string      `json:"screen_model,omitempty"`
 	Lang            string      `json:"lang"`
 	TimezoneMinutes int         `json:"timezone_minutes"`
 	City            string      `json:"city"`
@@ -265,6 +271,10 @@ func readBattery() int {
 }
 
 func readRSSI() int {
+	ip := getLocalIP()
+	if ip == "" {
+		return 0
+	}
 	data, err := os.ReadFile("/proc/net/wireless")
 	if err == nil {
 		lines := strings.Split(string(data), "\n")
@@ -1384,13 +1394,82 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 	}
 }
 
+func windows1251ToUTF8(b []byte) string {
+	var sb strings.Builder
+	for _, c := range b {
+		if c < 0x80 {
+			sb.WriteByte(c)
+		} else if c >= 0xC0 {
+			sb.WriteRune(rune(0x0410 + int(c) - 0xC0))
+		} else {
+			switch c {
+			case 0xA8:
+				sb.WriteRune('Ё')
+			case 0xB8:
+				sb.WriteRune('ё')
+			case 0xB9:
+				sb.WriteRune('№')
+			default:
+				sb.WriteRune(rune(c))
+			}
+		}
+	}
+	return sb.String()
+}
+
+const koi8rTable = "юабцдефгхийклмнопярстужвьызшэщчъЮАБЦДЕФГХИЙКЛМНОПЯРСТУЖВЬЫЗШЭЩЧЪ"
+
+func koi8rToUTF8(b []byte) string {
+	var sb strings.Builder
+	runes := []rune(koi8rTable)
+	for _, c := range b {
+		if c < 0x80 {
+			sb.WriteByte(c)
+		} else if c >= 0xC0 {
+			idx := int(c - 0xC0)
+			if idx < len(runes) {
+				sb.WriteRune(runes[idx])
+			} else {
+				sb.WriteByte('?')
+			}
+		} else if c == 0xA3 {
+			sb.WriteRune('ё')
+		} else if c == 0xB3 {
+			sb.WriteRune('Ё')
+		} else {
+			sb.WriteByte('?')
+		}
+	}
+	return sb.String()
+}
+
 func decodeMIME(s string) string {
-	dec := new(mime.WordDecoder)
+	dec := &mime.WordDecoder{
+		CharsetReader: func(charset string, input io.Reader) (io.Reader, error) {
+			cs := strings.ToLower(strings.TrimSpace(charset))
+			switch cs {
+			case "windows-1251", "cp1251", "cp-1251":
+				data, err := io.ReadAll(input)
+				if err != nil {
+					return nil, err
+				}
+				return bytes.NewReader([]byte(windows1251ToUTF8(data))), nil
+			case "koi8-r", "koi8r":
+				data, err := io.ReadAll(input)
+				if err != nil {
+					return nil, err
+				}
+				return bytes.NewReader([]byte(koi8rToUTF8(data))), nil
+			default:
+				return input, nil
+			}
+		},
+	}
 	decoded, err := dec.DecodeHeader(s)
 	if err != nil || decoded == "" {
-		return s
+		decoded = s
 	}
-	return decoded
+	return strings.Join(strings.Fields(decoded), " ")
 }
 
 func formatMailTime(dateStr string, timezoneMinutes int, lang string, nowUnix int64) string {
@@ -1531,18 +1610,36 @@ func (d *Daemon) pollIMAP(c Connector) {
 		fmt.Fprintf(conn, "%s FETCH %s (BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])\r\n", tag, msgID)
 
 		var cur EmailHeader
+		var lastField string
 		for {
 			line, err := tp.ReadLine()
 			if err != nil || strings.HasPrefix(line, tag+" OK") || strings.HasPrefix(line, tag+" NO") {
 				break
 			}
+			if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+				trimmed := strings.TrimSpace(line)
+				switch lastField {
+				case "from":
+					cur.From += " " + trimmed
+				case "subject":
+					cur.Subject += " " + trimmed
+				case "date":
+					cur.Date += " " + trimmed
+				}
+				continue
+			}
 			lower := strings.ToLower(line)
 			if strings.HasPrefix(lower, "from:") {
 				cur.From = strings.TrimSpace(line[5:])
+				lastField = "from"
 			} else if strings.HasPrefix(lower, "subject:") {
 				cur.Subject = strings.TrimSpace(line[8:])
+				lastField = "subject"
 			} else if strings.HasPrefix(lower, "date:") {
 				cur.Date = strings.TrimSpace(line[5:])
+				lastField = "date"
+			} else {
+				lastField = ""
 			}
 		}
 		headers = append(headers, cur)
@@ -1679,11 +1776,49 @@ func (d *Daemon) pollAllDue() {
 // Render & Screen Output
 // -----------------------------------------------------------------------------
 
-func (d *Daemon) renderFrame() error {
-	setupURL := "http://pbtablo-setup.local:8080"
+func (d *Daemon) getScreenDimensions() (int, int) {
+	d.mu.Lock()
+	model := d.settings.ScreenModel
+	d.mu.Unlock()
 
+	switch model {
+	case "600x800":
+		return 800, 600
+	case "758x1024":
+		return 1024, 758
+	case "1072x1448":
+		return 1448, 1072
+	case "1404x1872":
+		return 1872, 1404
+	default:
+		// "auto" or empty: detect from Linux sysfs virtual_size
+		data, err := os.ReadFile("/sys/class/graphics/fb0/virtual_size")
+		if err == nil {
+			var rx, ry int
+			if n, _ := fmt.Sscanf(strings.TrimSpace(string(data)), "%d,%d", &rx, &ry); n == 2 && rx > 0 && ry > 0 {
+				if rx > ry {
+					return rx, ry
+				}
+				return ry, rx
+			}
+		}
+	}
+	return 800, 600
+}
+
+func (d *Daemon) renderFrame() error {
 	d.mu.Lock()
 	configured := d.settings.Configured
+	devName := strings.TrimSpace(d.settings.DeviceName)
+	if devName == "" {
+		devName = "pb-tablo"
+	}
+	ip := getLocalIP()
+	setupURL := "http://" + devName + ".local:8080"
+	if ip != "" {
+		setupURL = "http://" + ip + ":8080"
+	}
+
 	deviceSetupURL := ""
 	if !configured {
 		deviceSetupURL = setupURL
@@ -1713,10 +1848,17 @@ func (d *Daemon) renderFrame() error {
 		return err
 	}
 
-	// Persist slots to cache file on flash storage so restarts retain data
+	// Persist slots and time offset to cache file on flash storage so restarts retain data
 	if len(payload.Slots) > 0 {
 		cacheFile := filepath.Join(filepath.Dir(d.cfgPath), "tablo_slots_cache.json")
-		if slotsData, err := json.Marshal(payload.Slots); err == nil {
+		cachePayload := struct {
+			TimeOffset int64           `json:"time_offset"`
+			Slots      map[string]Slot `json:"slots"`
+		}{
+			TimeOffset: atomic.LoadInt64(&d.timeOffset),
+			Slots:      payload.Slots,
+		}
+		if slotsData, err := json.Marshal(cachePayload); err == nil {
 			_ = os.WriteFile(cacheFile, slotsData, 0644)
 		}
 	}
@@ -1727,6 +1869,10 @@ func (d *Daemon) renderFrame() error {
 		"-slots", tmpSlotsFile,
 		"-out", tmpOut,
 		"-rot", d.rotMode,
+	}
+	sw, sh := d.getScreenDimensions()
+	if sw > 0 && sh > 0 {
+		args = append(args, "-w", strconv.Itoa(sw), "-h", strconv.Itoa(sh))
 	}
 	if !configured {
 		args = append(args, "-setup")
@@ -1746,14 +1892,28 @@ func (d *Daemon) renderFrame() error {
 	os.Rename(tmpOut, d.imgPath)
 
 	// Trigger PocketBook image viewer display if running on PB
-	if _, err := os.Stat("/ebrmain/bin/openbook"); err == nil {
-		exec.Command("killall", "-9", "picviewer.app").Run()
-		time.Sleep(300 * time.Millisecond)
-		exec.Command("/ebrmain/bin/openbook", d.imgPath).Start()
-	}
+	d.showOnPocketBook()
 
 	log.Printf("Frame rendered successfully -> %s (setup URL: %s)", d.imgPath, setupURL)
 	return nil
+}
+
+func (d *Daemon) showOnPocketBook() {
+	if _, err := os.Stat("/ebrmain/bin/openbook"); err != nil {
+		return
+	}
+	// Gracefully ask picviewer.app to exit so BookServer unregisters the task cleanly
+	exec.Command("killall", "-TERM", "picviewer.app").Run()
+	for i := 0; i < 4; i++ {
+		time.Sleep(80 * time.Millisecond)
+		if err := exec.Command("killall", "-0", "picviewer.app").Run(); err != nil {
+			// Process exited
+			break
+		}
+	}
+	exec.Command("killall", "-9", "picviewer.app").Run()
+	time.Sleep(150 * time.Millisecond)
+	exec.Command("/ebrmain/bin/openbook", d.imgPath).Start()
 }
 
 // -----------------------------------------------------------------------------
@@ -1779,6 +1939,12 @@ func (d *Daemon) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	// Return config matching to_json(include_secrets = false)
 	cfgCopy := d.settings
+	if cfgCopy.DeviceName == "" || cfgCopy.DeviceName == "tablo" || cfgCopy.DeviceName == "pbtablo-setup" {
+		cfgCopy.DeviceName = "pb-tablo"
+	}
+	if cfgCopy.ScreenModel == "" {
+		cfgCopy.ScreenModel = "auto"
+	}
 	maskedConnectors := make([]Connector, len(cfgCopy.Connectors))
 	for i, c := range cfgCopy.Connectors {
 		c.TokenSet = len(c.Token) > 0
@@ -1920,7 +2086,14 @@ func (d *Daemon) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := getLocalIP()
-	setupURL := "http://pbtablo-setup.local:8080"
+	devName := strings.TrimSpace(d.settings.DeviceName)
+	if devName == "" {
+		devName = "pb-tablo"
+	}
+	setupURL := "http://" + devName + ".local:8080"
+	if ip != "" {
+		setupURL = "http://" + ip + ":8080"
+	}
 
 	resp := map[string]interface{}{
 		"time_synced": atomic.LoadInt32(&d.timeSynced) == 1,
@@ -1971,35 +2144,31 @@ func (d *Daemon) handlePreview(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+// -----------------------------------------------------------------------------
+// Over-The-Air (OTA) Updates & GitHub Release Fetcher
+// -----------------------------------------------------------------------------
 
-	var reader io.Reader = r.Body
-	defer r.Body.Close()
+type GithubRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	HtmlUrl     string `json:"html_url"`
+	Assets      []struct {
+		Name               string `json:"name"`
+		BrowserDownloadUrl string `json:"browser_download_url"`
+		Size               int64  `json:"size"`
+	} `json:"assets"`
+}
 
-	contentType := r.Header.Get("Content-Type")
-	if strings.HasPrefix(contentType, "multipart/form-data") {
-		err := r.ParseMultipartForm(32 << 20)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse multipart form: %v", err), http.StatusBadRequest)
-			return
-		}
-		file, _, err := r.FormFile("file")
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Form field 'file' required: %v", err), http.StatusBadRequest)
-			return
-		}
-		defer file.Close()
-		reader = file
-	}
+func (d *Daemon) getGithubRepo() string {
+	return DefaultGithubRepo
+}
 
+func (d *Daemon) applyTarGzUpdate(reader io.Reader) ([]string, error) {
 	gzReader, err := gzip.NewReader(reader)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Invalid gzip format: %v", err), http.StatusBadRequest)
-		return
+		return nil, fmt.Errorf("invalid gzip format: %w", err)
 	}
 	defer gzReader.Close()
 
@@ -2021,8 +2190,7 @@ func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Tar extraction error: %v", err), http.StatusInternalServerError)
-			return
+			return updatedFiles, fmt.Errorf("tar extraction error: %w", err)
 		}
 
 		cleanName := filepath.Clean(header.Name)
@@ -2054,21 +2222,18 @@ func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-			http.Error(w, fmt.Sprintf("Mkdir failed for %s: %v", targetPath, err), http.StatusInternalServerError)
-			return
+			return updatedFiles, fmt.Errorf("mkdir failed for %s: %w", targetPath, err)
 		}
 
 		tmpPath := targetPath + ".ota_tmp"
 		f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 		if err != nil {
-			http.Error(w, fmt.Sprintf("Create file failed %s: %v", tmpPath, err), http.StatusInternalServerError)
-			return
+			return updatedFiles, fmt.Errorf("create file failed %s: %w", tmpPath, err)
 		}
 		if _, err := io.Copy(f, tarReader); err != nil {
 			f.Close()
 			os.Remove(tmpPath)
-			http.Error(w, fmt.Sprintf("Write failed %s: %v", tmpPath, err), http.StatusInternalServerError)
-			return
+			return updatedFiles, fmt.Errorf("write failed %s: %w", tmpPath, err)
 		}
 		f.Close()
 
@@ -2080,12 +2245,61 @@ func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 		os.Remove(targetPath)
 		if err := os.Rename(tmpPath, targetPath); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to replace %s: %v", targetPath, err), http.StatusInternalServerError)
-			return
+			return updatedFiles, fmt.Errorf("failed to replace %s: %w", targetPath, err)
 		}
 
 		updatedFiles = append(updatedFiles, cleanName)
 		log.Printf("OTA: Updated %s -> %s", cleanName, targetPath)
+	}
+
+	return updatedFiles, nil
+}
+
+func (d *Daemon) restartTablo() {
+	time.Sleep(1 * time.Second)
+	log.Printf("OTA: Restarting Tablo daemon and launcher...")
+	d.showOnPocketBook()
+
+	daemonBin := os.Args[0]
+	if _, err := os.Stat("/mnt/ext1/applications/.tablo/bin/tablo_daemon"); err == nil {
+		daemonBin = "/mnt/ext1/applications/.tablo/bin/tablo_daemon"
+	}
+	log.Printf("OTA: Executing new binary %s...", daemonBin)
+	if err := syscall.Exec(daemonBin, os.Args, os.Environ()); err != nil {
+		log.Printf("OTA: Exec failed: %v, exiting so launcher or supervisor restarts...", err)
+		os.Exit(0)
+	}
+}
+
+func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var reader io.Reader = r.Body
+	defer r.Body.Close()
+
+	contentType := r.Header.Get("Content-Type")
+	if strings.HasPrefix(contentType, "multipart/form-data") {
+		err := r.ParseMultipartForm(32 << 20)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse multipart form: %v", err), http.StatusBadRequest)
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Form field 'file' required: %v", err), http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		reader = file
+	}
+
+	updatedFiles, err := d.applyTarGzUpdate(reader)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Update failed: %v", err), http.StatusBadRequest)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -2095,17 +2309,149 @@ func (d *Daemon) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		"files":   updatedFiles,
 	})
 
-	go func() {
-		time.Sleep(1 * time.Second)
-		log.Printf("OTA: Restarting Tablo launcher...")
-		if _, err := os.Stat("/mnt/ext1/applications/Tablo.app"); err == nil {
-			cmd := exec.Command("/bin/sh", "/mnt/ext1/applications/Tablo.app")
-			cmd.Start()
-		} else {
-			d.renderFrame()
-			syscall.Exec(os.Args[0], os.Args, os.Environ())
+	go d.restartTablo()
+}
+
+func (d *Daemon) handleOtaCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+
+	repo := d.getGithubRepo()
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
+
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":              false,
+			"current_version": AppVersion,
+			"error":           err.Error(),
+		})
+		return
+	}
+	req.Header.Set("User-Agent", "PocketBook-Tablo/"+AppVersion)
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":              false,
+			"current_version": AppVersion,
+			"error":           fmt.Sprintf("Не удалось связаться с GitHub: %v", err),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":              true,
+			"current_version": AppVersion,
+			"latest_version":  AppVersion,
+			"has_update":      false,
+			"message":         "На GitHub пока нет опубликованных релизов",
+		})
+		return
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":              false,
+			"current_version": AppVersion,
+			"error":           fmt.Sprintf("GitHub API вернул статус %d", resp.StatusCode),
+		})
+		return
+	}
+
+	var rel GithubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ok":              false,
+			"current_version": AppVersion,
+			"error":           fmt.Sprintf("Ошибка разбора ответа GitHub: %v", err),
+		})
+		return
+	}
+
+	downloadUrl := fmt.Sprintf("https://github.com/%s/releases/latest/download/update.tar.gz", repo)
+	for _, a := range rel.Assets {
+		if a.Name == "update.tar.gz" && a.BrowserDownloadUrl != "" {
+			downloadUrl = a.BrowserDownloadUrl
+			break
 		}
-	}()
+	}
+
+	hasUpdate := rel.TagName != "" && rel.TagName != AppVersion
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":              true,
+		"current_version": AppVersion,
+		"latest_version":  rel.TagName,
+		"has_update":      hasUpdate,
+		"release_name":    rel.Name,
+		"release_notes":   rel.Body,
+		"published_at":    rel.PublishedAt,
+		"download_url":    downloadUrl,
+	})
+}
+
+func (d *Daemon) handleOtaGithub(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	repo := d.getGithubRepo()
+	downloadUrl := fmt.Sprintf("https://github.com/%s/releases/latest/download/update.tar.gz", repo)
+
+	var payload struct {
+		Url string `json:"url"`
+	}
+	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
+		json.NewDecoder(r.Body).Decode(&payload)
+		if payload.Url != "" {
+			downloadUrl = payload.Url
+		}
+	}
+
+	log.Printf("OTA: Fetching update from %s...", downloadUrl)
+
+	req, err := http.NewRequest(http.MethodGet, downloadUrl, nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create request: %v", err), http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("User-Agent", "PocketBook-Tablo/"+AppVersion)
+
+	client := &http.Client{
+		Timeout: 5 * time.Minute,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Download failed: %v", err), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		http.Error(w, fmt.Sprintf("Download failed, HTTP status %d", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+
+	updatedFiles, err := d.applyTarGzUpdate(resp.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Update installation failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"ok":      true,
+		"message": fmt.Sprintf("Успешно установлено файлов: %d. Перезапуск Tablo...", len(updatedFiles)),
+		"files":   updatedFiles,
+	})
+
+	go d.restartTablo()
 }
 
 // -----------------------------------------------------------------------------
@@ -2211,8 +2557,15 @@ func main() {
 					}
 				}
 			}
-			if userSettings.DeviceName != "" {
+			if userSettings.DeviceName != "" && userSettings.DeviceName != "tablo" && userSettings.DeviceName != "pbtablo-setup" {
 				settings.DeviceName = userSettings.DeviceName
+			} else {
+				settings.DeviceName = "pb-tablo"
+			}
+			if userSettings.ScreenModel != "" {
+				settings.ScreenModel = userSettings.ScreenModel
+			} else {
+				settings.ScreenModel = "auto"
 			}
 			if userSettings.Lang != "" {
 				settings.Lang = userSettings.Lang
@@ -2236,10 +2589,19 @@ func main() {
 	}
 
 	initialSlots := make(map[string]Slot)
+	var cachedTimeOffset int64
 	cacheFile := filepath.Join(filepath.Dir(*cfgPath), "tablo_slots_cache.json")
 	if cData, err := os.ReadFile(cacheFile); err == nil {
-		if err := json.Unmarshal(cData, &initialSlots); err == nil {
-			log.Printf("Loaded %d cached slots from %s", len(initialSlots), cacheFile)
+		var sc struct {
+			TimeOffset int64           `json:"time_offset"`
+			Slots      map[string]Slot `json:"slots"`
+		}
+		if err := json.Unmarshal(cData, &sc); err == nil && sc.Slots != nil {
+			initialSlots = sc.Slots
+			cachedTimeOffset = sc.TimeOffset
+			log.Printf("Loaded %d cached slots (offset: %ds) from %s", len(initialSlots), cachedTimeOffset, cacheFile)
+		} else if err := json.Unmarshal(cData, &initialSlots); err == nil {
+			log.Printf("Loaded %d legacy cached slots from %s", len(initialSlots), cacheFile)
 		}
 	}
 
@@ -2255,6 +2617,9 @@ func main() {
 		failed:       make(map[string]string),
 		lastPolled:   make(map[string]time.Time),
 		lastIP:       getLocalIP(),
+	}
+	if cachedTimeOffset != 0 {
+		atomic.StoreInt64(&d.timeOffset, cachedTimeOffset)
 	}
 
 	// Initial time sync
@@ -2285,8 +2650,19 @@ func main() {
 	http.HandleFunc("/api/widgets", d.handleGetWidgets)
 	http.HandleFunc("/api/status", d.handleGetStatus)
 	http.HandleFunc("/api/scan", d.handleScan)
+	http.HandleFunc("/api/refresh", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+		go func() {
+			d.pollAllDue()
+			time.Sleep(500 * time.Millisecond)
+			d.renderFrame()
+		}()
+	})
 	http.HandleFunc("/api/reboot", d.handleReboot)
 	http.HandleFunc("/api/update", d.handleUpdate)
+	http.HandleFunc("/api/ota/check", d.handleOtaCheck)
+	http.HandleFunc("/api/ota/github", d.handleOtaGithub)
 	http.HandleFunc("/api/preview.png", d.handlePreview)
 	http.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
 		data, err := os.ReadFile("/tmp/tablo.log")
@@ -2303,13 +2679,13 @@ func main() {
 		Handler: nil,
 	}
 
-	// Start mDNS responder strictly for pbtablo-setup.local (no short variants)
+	// Start mDNS responder for pb-tablo.local (and aliases for compatibility)
 	devName := strings.TrimSpace(d.settings.DeviceName)
 	if devName == "" {
-		devName = "pbtablo-setup"
+		devName = "pb-tablo"
 	}
-	mdnsNames := []string{"pbtablo-setup.local"}
-	if devName != "pbtablo-setup" {
+	mdnsNames := []string{"pb-tablo.local", "pbtablo-setup.local"}
+	if devName != "pb-tablo" && devName != "pbtablo-setup" {
 		mdnsNames = append(mdnsNames, devName+".local")
 	}
 	startMDNSResponder(mdnsNames)

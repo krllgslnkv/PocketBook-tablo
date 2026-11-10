@@ -1,144 +1,138 @@
 <p align="center">
-  <img src="docs/images/panel-photo.jpg" alt="tablo e-ink dashboard on a desk: markets, Claude and Codex limits, air quality, mail and weather" width="820">
+  <img src="docs/images/pocketbook-tablo-dashboard.png" alt="pb-tablo e-ink dashboard on PocketBook" width="800">
 </p>
 
-<h1 align="center">tablo</h1>
+<h1 align="center">pb-tablo</h1>
 
 <p align="center">
-  Self-contained e-ink dashboard firmware for the TRMNL 7.5" DIY kit (ESP32-S3).<br>
-  Crypto and forex rates, Claude Code and Codex usage limits, air quality, unread mail, weather. No server required.
-</p>
-
-<p align="center">
-  <a href="https://github.com/pavellunev/tablo/actions/workflows/ci.yml"><img src="https://github.com/pavellunev/tablo/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/pavellunev/tablo/releases"><img src="https://img.shields.io/github/v/release/pavellunev/tablo?include_prereleases" alt="Release"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+  E-ink dashboard for PocketBook. Rates, AI limits, Home Assistant, mail, web setup, and OTA updates.<br>
+  Autonomous port and fork of <a href="https://github.com/pavellunev/tablo">pavellunev/tablo</a>.
 </p>
 
 <p align="center">
   English · <a href="README.ru.md">Русский</a>
 </p>
 
+---
+
 ## Features
 
-- **Standalone.** The ESP32 fetches data straight from Binance, the Central Bank of Russia, Anthropic, OpenAI, Open-Meteo, Home Assistant and your IMAP mailbox, then renders the frame itself. No home server, no cloud relay, no companion app.
-- **Claude Code and Codex limits on your desk.** Remaining 5-hour and weekly windows, time to reset. OAuth tokens are refreshed on the device.
-- **Honest display.** Stale values are marked, a failed source shows the reason instead of disappearing, zero is never drawn in place of "no data".
-- **Three dashboards** switched with the on-board buttons, composed from widgets on the setup page.
-- **Phone setup.** Access point with a QR code on first boot, then a web page on your home network. UI in English or Russian.
-- **E-ink friendly.** Partial refresh only when something changed, full refresh once an hour.
-- **Prebuilt firmware** in [Releases](https://github.com/pavellunev/tablo/releases), host-side tests and frame rendering without hardware.
+- **Standalone & Autonomous:** Runs directly on the PocketBook. No server required.
+- **Rates & Markets:** Live BTC price with a 24-hour mini-chart; USD/RUB and EUR/RUB official exchange rates with daily change indicators.
+- **AI Quota Limits:** Visual gauges and reset countdowns for 5-hour and weekly quotas (Antigravity, Claude Code, OpenAI Codex).
+- **Home Assistant:** temperature, humidity, CO2, and other smart home sensors.
+- **Mail:** unread count and the 5 latest messages.
+- **Weather:** Current temperature and daily forecast via Open-Meteo with automatic geocoding.
+- **Web Setup Portal:** Easy configuration directly from your phone or PC browser at `http://pb-tablo.local:8080`.
+- **OTA Updates via GitHub:** Update to new releases over Wi-Fi with a single click.
 
-## What's on the screen
+---
 
-<p align="center">
-  <img src="docs/images/dashboard-desk.png" alt="Default dashboard: markets, AI limits and air quality, mail, today" width="800">
-</p>
+## Architecture
 
-| Block | Shows | Source |
-|---|---|---|
-| **Markets** | BTC with a 24-hour chart, USD and EUR rates with daily change | Binance, Central Bank of Russia |
-| **Limits** | Remaining Claude 5-hour and weekly windows, Codex weekly window, time to reset | Anthropic and OpenAI OAuth usage endpoints |
-| **Air** | CO₂ and TVOC with a 6-hour chart and a "fresh / ok / ventilate" state | Home Assistant |
-| **Mail** | Unread count and the last four messages | IMAP |
-| **Today** | Temperature and weather summary for your city | Open-Meteo, geocoding and time zone resolved automatically |
+The project consists of three lightweight native components:
 
-When sources fail, every block stays on screen and explains why:
+1. **tablo_daemon (Go):**
+   Runs as a background daemon on the PocketBook. Fetches data from external endpoints (APIs, Home Assistant, IMAP), maintains Wi-Fi connectivity, hosts the HTTP Web Setup server on port 8080, checks GitHub for new releases, and handles OTA updates.
+2. **tablo_render (C++):**
+   High-performance native rendering engine adapted from the original Tablo firmware. Takes raw data from the daemon and draws the dashboard with anti-aliased geometry, charts, and custom fonts scaled for the target resolution.
+3. **Tablo.app (Shell):**
+   Launcher script integrated with PocketBook's native application menu (`/mnt/ext1/applications/Tablo.app`) and window manager.
 
-<p align="center">
-  <img src="docs/images/dashboard-failures.png" alt="All sources down: each block shows the reason" width="800">
-</p>
+---
 
-## Hardware
+## Device Compatibility
 
-[Seeed Studio TRMNL 7.5" OG DIY Kit](https://www.seeedstudio.com/TRMNL-7-5-Inch-OG-DIY-Kit-p-6481.html):
-XIAO ESP32-S3 (8 MB flash, 8 MB PSRAM), 7.5" 800×480 monochrome e-paper, three buttons, battery with charge measurement.
-The stand in the photo is an [L-shaped case from MakerWorld](https://makerworld.com/en/models/1625065-trmnl-7-5-og-diy-kit-l-shape).
+pb-tablo uses statically compiled ARMv7 binaries with zero shared library dependencies, communicating directly with PocketBook's native Linux subsystem (`ebrmain`).
 
-## Install
+### Tested and Verified
+- **PocketBook 625 (Basic Touch 2):** 6.0", 800x600, E-Ink Carta, Wi-Fi. Fully tested and verified on physical hardware.
 
-### Prebuilt firmware
+### Untested (Theoretically Compatible)
 
-Download `tablo-<version>-full.bin` from [Releases](https://github.com/pavellunev/tablo/releases) and flash it at address `0x0`:
+The following models have Wi-Fi and run on the same platform, but have **not yet been physically tested**:
+
+- PocketBook 624 (Basic Touch)
+- PocketBook 622 (Touch)
+- PocketBook 626 / 626 Plus (Touch Lux 2 / Touch Lux 3)
+- PocketBook 627 (Touch Lux 4)
+- PocketBook 628 (Touch Lux 5)
+- PocketBook 617 (Basic Lux 3)
+- PocketBook 623 (Touch Lux)
+- PocketBook 631 (Touch HD)
+- PocketBook 632 (Touch HD 3)
+- PocketBook 633 (Color)
+- PocketBook Verse / Verse Pro
+- PocketBook 740 (InkPad 3) / InkPad 4 / InkPad Color
+
+---
+
+## Installation
+
+1. Download the latest release archive (`PocketBook-tablo-*.zip`) from [Releases](https://github.com/krllgslnkv/PocketBook-tablo/releases).
+2. Connect your PocketBook to your computer via USB (select "PC Link" / "Charge & Storage").
+3. Unpack the contents into the root of the PocketBook storage:
+   - `applications/Tablo.app`
+   - `applications/.tablo/` (contains binaries and web assets)
+   - `tablo_config.json`
+4. Safely disconnect USB.
+5. In the PocketBook Applications menu, tap Tablo.
+6. On the first launch, the device displays a setup screen with a QR code and its IP address. Open `http://pb-tablo.local:8080` (or `http://<device-ip>:8080`) in any browser to configure your dashboard.
+
+---
+
+## Build
+
+Requirements: Docker, Bash.
 
 ```bash
-pip install esptool
-esptool.py --chip esp32s3 --port /dev/ttyACM0 write_flash 0x0 tablo-<version>-full.bin
+git clone https://github.com/krllgslnkv/PocketBook-tablo.git
+cd PocketBook-tablo
+./pocketbook/build_package.sh
 ```
 
-Without a command line: open [web.esphome.io](https://web.esphome.io) in Chrome, connect the board over USB and pick the same file.
+The script compiles:
+- The static ARM C++ renderer (`tablo_render_arm`).
+- The static ARM Go daemon (`tablo_daemon_arm`).
+- Generates `dist_pb/` and creates `update.tar.gz`.
 
-### Build from source
+---
 
-Requires [PlatformIO](https://platformio.org/) and Python 3.
+## Configuration
 
-```bash
-pio run                    # build
-pio run -t upload          # flash firmware
-pio run -t uploadfs        # flash the setup page
-./scripts/verify.sh        # build + host-side tests
-```
+All settings can be modified via the built-in web portal at `http://pb-tablo.local:8080`:
 
-`firmware/src/secrets.h` is optional. Copy it from `secrets.h.example` if you want Wi-Fi and tokens baked into the image; otherwise enter everything on the setup page.
+- **Device:** Device hostname, language (English / Russian), and screen resolution model (`Auto`, `600x800`, `758x1024`, `1072x1448`, `1404x1872`).
+- **Home Assistant:** URL, Long-Lived Access Token, and entity IDs for temperature, humidity, CO2, and TVOC.
+- **AI Limits:** API tokens for Anthropic Claude, OpenAI, or Antigravity quota endpoints.
+- **Mail:** IMAP host, port, login, and application password.
+- **Weather & City:** City name or geographical coordinates.
 
-## Setup
+---
 
-**First boot.** With no known network the device starts an access point named `tablo-setup` and shows its password and a QR code. Point your phone camera at the code, the setup page opens.
+## OTA Updates via GitHub
 
-<p align="center">
-  <img src="docs/images/setup-access-point.png" alt="Access point screen: network name, password and QR code" width="800">
-</p>
+When a new release is published on GitHub, you can update your PocketBook directly over Wi-Fi:
 
-**Later.** On your home network the page is at `http://tablo-setup.local/` (the device name can be changed there). Sources are configured as cards: Claude, Codex, mail, Home Assistant, rates, weather and city. Secrets are entered once and never shown again. Hold button 1 for three seconds to force the access point.
+1. Open `http://pb-tablo.local:8080`.
+2. Click **Update via Wi-Fi**.
+3. The device checks GitHub Releases, displays the new version details, downloads `update.tar.gz`, unpacks the binaries, and automatically restarts.
 
-**Credentials.**
+---
 
-| Source | What to enter | Where to get it |
-|---|---|---|
-| Claude | OAuth access + refresh token | Claude Code login: `~/.claude/.credentials.json` (macOS: Keychain item "Claude Code-credentials") |
-| Codex | OAuth access + refresh token | Codex CLI login: `~/.codex/auth.json` |
-| Mail | IMAP server, address, app password | Your provider's app passwords (Gmail: Security → App passwords) |
-| Home Assistant | URL, long-lived access token | HA profile → Security → Long-lived access tokens |
-| Rates, weather | nothing | public APIs |
+## Offline Behavior
 
-Anthropic and OpenAI usage endpoints are not reachable from every region. The device reports this on screen instead of showing zeros.
+- If the network connection is lost, the screen displays a persistent banner: "Connect PocketBook to Wi-Fi network" with troubleshooting guidance, while the network icon is struck through.
+- When an API source fails, the affected block explains the failure on-screen instead of disappearing or rendering blank values.
 
-## Dashboards and widgets
+---
 
-Three dashboards are switched with buttons 1–3. Each is built on the setup page from a widget palette with a live preview.
+## Acknowledgements and Upstream
 
-| Size | Width | Meaning |
-|---|---|---|
-| `S` | 202 px | narrow column, like Today |
-| `M` | 296 px | medium, like Markets |
-| `flex` | remaining | shares the rest of the row with other flex widgets |
+This project is a fork of <a href="https://github.com/pavellunev/tablo">pavellunev/tablo</a>, originally created by Pavel Lunev for the TRMNL 7.5" DIY Kit (ESP32-S3).
 
-A hidden widget leaves no gap, its neighbours take the space. Built-in widgets: markets, limits, air, limits + air, mail, today, metric (any slot, large) and caption.
-
-Adding a widget is one file plus a registry entry. Widgets declare which data slots they need and how often, and the device polls a source only when some visible widget needs it. See [docs/widgets.md](docs/widgets.md).
-
-## Development
-
-```
-sources ──► connectors ──► slots ──► widgets ──► 800×480 frame
-Binance,    HTTP/JSON,     btc,      markets,    1-bit canvas,
-Anthropic,  OAuth refresh, limit.*,  limits,     Terminus +
-OpenAI,     IMAP dialog,   co2,      air, mail,  IBM Plex Mono,
-Open-Meteo, parsing        mail.*    today, …    partial refresh
-```
-
-- `scripts/verify.sh` builds the firmware and runs host-side tests (slots, config, layout, polling schedule, buttons). `--fast` skips tests.
-- `tools/render_frame/build_and_run.sh` renders every screen to PNG with the same layout code that runs on the panel: three dashboards, boot and access point screens, failure scenarios.
-- `tools/compare_frame.py` checks the frame skeleton against the reference mockup.
-- CI runs the same build and tests on every push. A `v*` tag publishes a release with `full`, `firmware` and `littlefs` images.
-
-Documentation (Russian for now):
-
-- [docs/decisions.md](docs/decisions.md) — design decisions and their cost: on-device rendering, OAuth and IMAP without a relay, setup from any network, HTTPS with pinned roots.
-- [docs/architecture.md](docs/architecture.md) — slots, connectors, layout.
-- [docs/widgets.md](docs/widgets.md) — how to add a widget.
-- [docs/constructor.md](docs/constructor.md) — dashboards, palette, source wizard.
+---
 
 ## License
 
-MIT. Fonts Terminus and IBM Plex Mono are under SIL OFL 1.1, see `firmware/assets/`.
+MIT License. See [LICENSE](LICENSE) for details.
