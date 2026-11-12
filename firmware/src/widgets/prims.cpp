@@ -284,12 +284,12 @@ void draw_air_metric(Canvas& c, Rect area, const char* label, const char* unit, 
     int16_t label_w = text_width(fonts::Terminus20, label);
     bool multiline = (label_w > 40);
 
-    int16_t baseline = static_cast<int16_t>(area.y + 14);
+    int16_t baseline = static_cast<int16_t>(area.y + (multiline ? 7 : 14));
     draw_text(c, fonts::Terminus20, area.x, baseline, label, Color::Black, 1, /*bold=*/true);
 
     String val = layout::format_value(s, now, decimals, "");
     int16_t value_x = multiline ? area.x : static_cast<int16_t>(area.x + label_w + 8);
-    int16_t val_baseline = multiline ? static_cast<int16_t>(baseline + 30) : static_cast<int16_t>(baseline + 4);
+    int16_t val_baseline = multiline ? static_cast<int16_t>(area.y + 46) : static_cast<int16_t>(baseline + 4);
 
     draw_text(c, fonts::PlexMono41, value_x, val_baseline, val.c_str(), Color::Black);
     int16_t vw = text_width(fonts::PlexMono41, val.c_str());
@@ -548,7 +548,7 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             int16_t half = static_cast<int16_t>((r.w - 20) / 2);
             draw_air_metric(c, Rect{r.x, area_y, half, area_h}, temp_label, "°C", temp, d.now,
                             temp_alarm, temp_quiet, 1);
-            c.vline(static_cast<int16_t>(r.x + half + 10), area_y, 74, Color::Black);
+            c.vline(static_cast<int16_t>(r.x + half + 10), static_cast<int16_t>(area_y - 6), 78, Color::Black);
             draw_air_metric(c, Rect{static_cast<int16_t>(r.x + half + 20), area_y, half, area_h},
                             hum_label, "%", hum, d.now, hum_alarm, hum_quiet, 0);
         } else if (has_temp) {
