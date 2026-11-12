@@ -478,29 +478,39 @@ void draw_limits_and_air(Canvas& c, const Store& store, const layout::DeviceInfo
             draw_text(c, fonts::Terminus20, r.x, title_baseline, "Antigravity", Color::Black, 1, /*bold=*/true);
             const Slot* reset = store.find("limit.antigravity.reset");
             if (layout::has_data(reset)) {
-                int16_t rw = text_width(fonts::Terminus20, reset->text.c_str());
-                draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - rw),
-                          title_baseline, reset->text.c_str(), Color::Black, 1, /*bold=*/true);
+                int16_t title_w = text_width(fonts::Terminus20, "Antigravity");
+                int16_t max_rw = static_cast<int16_t>(r.w - title_w - 8);
+                if (max_rw > 20) {
+                    String fitted = truncate_to_width(fonts::Terminus20, reset->text.c_str(), max_rw);
+                    int16_t rw = text_width(fonts::Terminus20, fitted.c_str());
+                    draw_text(c, fonts::Terminus20, static_cast<int16_t>(r.x + r.w - rw),
+                              title_baseline, fitted.c_str(), Color::Black, 1, /*bold=*/true);
+                }
             }
             int16_t bar_y = static_cast<int16_t>(title_baseline + 16);
-            if (antigravity_week != nullptr && layout::has_data(antigravity_week)) {
+            bool has_ag_5h = (antigravity_5h != nullptr && layout::has_data(antigravity_5h));
+            bool has_ag_week = (antigravity_week != nullptr && layout::has_data(antigravity_week));
+            if (has_ag_5h && has_ag_week) {
                 int16_t half = static_cast<int16_t>((r.w - 20) / 2);
                 draw_limit_row(c, Rect{r.x, bar_y, half, 16}, i18n::tr(i18n::Str::kFiveHours), antigravity_5h, d.now, 10);
                 c.vline(static_cast<int16_t>(r.x + half + 10), bar_y, 16, Color::Black);
                 draw_limit_row(c, Rect{static_cast<int16_t>(r.x + half + 20), bar_y, half, 16},
                                i18n::tr(i18n::Str::kWeek), antigravity_week, d.now, 10);
                 cursor = static_cast<int16_t>(bar_y + 16);
-            } else if (antigravity_5h != nullptr && layout::has_data(antigravity_5h)) {
-                String pct = layout::format_percent(antigravity_5h, d.now);
-                int16_t pw = text_width(fonts::PlexMono28, pct.c_str());
-                int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
-                if (bar_w > 0) {
-                    draw_segbar(c, Rect{r.x, bar_y, bar_w, 18}, 100.0f - antigravity_5h->number,
-                                layout::segments_for_width(bar_w));
+            } else {
+                const Slot* single = has_ag_week ? antigravity_week : antigravity_5h;
+                if (single != nullptr && layout::has_data(single)) {
+                    String pct = layout::format_percent(single, d.now);
+                    int16_t pw = text_width(fonts::PlexMono28, pct.c_str());
+                    int16_t bar_w = static_cast<int16_t>(r.w - pw - 8);
+                    if (bar_w > 0) {
+                        draw_segbar(c, Rect{r.x, bar_y, bar_w, 18}, 100.0f - single->number,
+                                    layout::segments_for_width(bar_w));
+                    }
+                    draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - pw),
+                              static_cast<int16_t>(bar_y + 16), pct.c_str(), Color::Black);
+                    cursor = static_cast<int16_t>(bar_y + 18);
                 }
-                draw_text(c, fonts::PlexMono28, static_cast<int16_t>(r.x + r.w - pw),
-                          static_cast<int16_t>(bar_y + 16), pct.c_str(), Color::Black);
-                cursor = static_cast<int16_t>(bar_y + 18);
             }
         }
 

@@ -413,6 +413,10 @@ var I18N = {
     'card.antigravity.hint': '<b>On Mac:</b> in terminal <code>security find-generic-password -s gemini -a antigravity -w</code>.<br>' +
       '<b>On Windows:</b> <i>Control Panel → Credential Manager → Windows Credentials</i>, find <code>gemini:antigravity</code> and click "Show".<br>' +
       'Paste the result — the device will automatically extract and refresh the token.',
+    'antigravity.quotaMode': 'Quota pool',
+    'antigravity.quotaMode.min': 'Minimum (nearest of Gemini / Claude & GPT)',
+    'antigravity.quotaMode.gemini': 'Gemini (Flash / Pro)',
+    'antigravity.quotaMode.claude': 'Claude / GPT (3rd-party models)',
     'card.claude.hint': 'On Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code>. On Windows: <code>%USERPROFILE%\\.claude\\.credentials.json</code>. Fields <code>claudeAiOauth.accessToken</code> and <code>.refreshToken</code>.',
     'card.codex.hint': 'Source: <code>~/.codex/auth.json</code> (Windows: <code>%USERPROFILE%\\.codex\\auth.json</code>) → <code>tokens.access_token</code> and <code>tokens.refresh_token</code>.',
     'mail.server': 'IMAP server',
@@ -548,6 +552,10 @@ var I18N = {
     'card.antigravity.hint': '<b>На Mac:</b> в терминале <code>security find-generic-password -s gemini -a antigravity -w</code>.<br>' +
       '<b>На Windows:</b> <i>Панель управления → Диспетчер учетных данных → Учетные данные Windows</i>, найти <code>gemini:antigravity</code> и нажать «Показать».<br>' +
       'Вставьте результат — устройство само извлечёт и будет автоматически обновлять токен.',
+    'antigravity.quotaMode': 'Отображаемая квота',
+    'antigravity.quotaMode.min': 'Минимум (ближайший лимит: Gemini / Claude и GPT)',
+    'antigravity.quotaMode.gemini': 'Gemini (Flash / Pro)',
+    'antigravity.quotaMode.claude': 'Claude / GPT (сторонние модели)',
     'card.claude.hint': 'На Mac: <code>security find-generic-password -s "Claude Code-credentials" -w</code>. На Windows: <code>%USERPROFILE%\\.claude\\.credentials.json</code>. Поля <code>claudeAiOauth.accessToken</code> и <code>.refreshToken</code>.',
     'card.codex.hint': 'Источник: <code>~/.codex/auth.json</code> (Windows: <code>%USERPROFILE%\\.codex\\auth.json</code>) → <code>tokens.access_token</code> и <code>tokens.refresh_token</code>.',
     'mail.server': 'Сервер IMAP',
@@ -614,7 +622,7 @@ function isFactoryId(id) { return !!FACTORY_IDS[id]; }
 // карточка, по какому слоту показывать «обновлено N мин назад», и всегда ли
 // она считается настроенной (Курсы и Погода — публичные API без ключа).
 var SOURCE_CARDS = [
-  { key: 'antigravity', titleKey: 'card.antigravity.title', connIds: ['antigravity'], firstSlot: 'limit.antigravity.5h', always: false },
+  { key: 'antigravity', titleKey: 'card.antigravity.title', connIds: ['antigravity'], firstSlot: 'limit.antigravity.reset', always: false },
   { key: 'claude', titleKey: 'card.claude.title', connIds: ['claude'], firstSlot: 'limit.claude.5h', always: false },
   { key: 'codex', titleKey: 'card.codex.title', connIds: ['codex'], firstSlot: 'limit.codex', always: false },
   { key: 'mail', titleKey: 'card.mail.title', connIds: ['mail'], firstSlot: 'mail.unread', always: false },
@@ -677,7 +685,7 @@ function ensureFactoryConnectors() {
     state.connectors.push({
       id: stub.id, kind: stub.kind, url: '', interval: 300,
       token: '', token_set: false, refresh_token: '', refresh_token_set: false,
-      username: '', username_set: false, insecure: false, map: []
+      username: '', username_set: false, insecure: false, quota_mode: stub.id === 'antigravity' ? 'min' : '', map: []
     });
   });
 }
@@ -1217,8 +1225,14 @@ function drawPreview() {
 function renderAntigravityCard() {
   var c = conn('antigravity');
   var val = c.token ? ' value="' + escapeAttr(c.token) + '"' : '';
+  var mode = c.quota_mode || 'min';
   return '<div class="source-card" id="source-card-antigravity"><h3>' + t('card.antigravity.title') + '</h3>' + statusLineHtml('antigravity') +
     '<label>' + t('field.token') + '<input type="password"' + val + ' placeholder="' + tokenPlaceholder(c.token_set || c.refresh_token_set) + '" data-conn-field="token" data-conn-id="antigravity"></label>' +
+    '<label>' + t('antigravity.quotaMode') + '<select data-conn-field="quota_mode" data-conn-id="antigravity">' +
+      '<option value="min"' + (mode === 'min' ? ' selected' : '') + '>' + t('antigravity.quotaMode.min') + '</option>' +
+      '<option value="gemini"' + (mode === 'gemini' ? ' selected' : '') + '>' + t('antigravity.quotaMode.gemini') + '</option>' +
+      '<option value="claude"' + (mode === 'claude' ? ' selected' : '') + '>' + t('antigravity.quotaMode.claude') + '</option>' +
+    '</select></label>' +
     '<p class="hint">' + t('card.antigravity.hint') + '</p>' +
     '</div>';
 }
@@ -1561,6 +1575,7 @@ function loadConfig() {
         refresh_token: '', refresh_token_set: !!c.refresh_token_set,
         username: '', username_set: !!c.username_set,
         insecure: !!c.insecure,
+        quota_mode: c.quota_mode || (c.id === 'antigravity' ? 'min' : ''),
         // Мутируем эти же объекты, не пересобираем — в них есть has_history,
         // delta_source, delta_is_previous, history_source, history_item, они
         // должны уйти назад ровно так, как пришли.
@@ -1885,7 +1900,7 @@ function save() {
       return {
         id: c.id, kind: c.kind, url: c.url, interval: c.interval,
         token: c.token || '', refresh_token: c.refresh_token || '', username: c.username || '',
-        insecure: !!c.insecure, map: c.map || []
+        insecure: !!c.insecure, quota_mode: c.quota_mode || '', map: c.map || []
       };
     })
   };

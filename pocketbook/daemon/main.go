@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +72,7 @@ type Connector struct {
 	RefreshTokenSet bool          `json:"refresh_token_set"`
 	UsernameSet     bool          `json:"username_set"`
 	Insecure        bool          `json:"insecure"`
+	QuotaMode       string        `json:"quota_mode,omitempty"`
 	Map             []SlotMapping `json:"map"`
 }
 
@@ -1172,6 +1174,367 @@ func getAntigravityOAuthCreds() (string, string) {
 	return p1 + p2, s1 + s2
 }
 
+const antigravityUserAgent = "antigravity/2.25.0 (aidev_client; os_type=linux; arch=arm64; cl=1003475615)"
+
+type agQuota struct {
+	Pct       float64
+	ResetTime string
+}
+
+type agBuckets struct {
+	Gemini5h   *agQuota
+	GeminiWeek *agQuota
+	Claude5h   *agQuota
+	ClaudeWeek *agQuota
+}
+
+func (d *Daemon) refreshAntigravityAccessToken(client *http.Client, connID, refreshToken string) string {
+	if refreshToken == "" {
+		return ""
+	}
+	cID, cSec := getAntigravityOAuthCreds()
+	form := url.Values{
+		"client_id":     {cID},
+		"client_secret": {cSec},
+		"refresh_token": {refreshToken},
+		"grant_type":    {"refresh_token"},
+	}
+	resp, err := client.PostForm("https://oauth2.googleapis.com/token", form)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var tr struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil || tr.AccessToken == "" {
+		return ""
+	}
+	d.mu.Lock()
+	for idx := range d.settings.Connectors {
+		if d.settings.Connectors[idx].ID == connID {
+			d.settings.Connectors[idx].Token = tr.AccessToken
+			d.settings.Connectors[idx].RefreshToken = refreshToken
+			break
+		}
+	}
+	if data, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
+		os.WriteFile(d.cfgPath, data, 0644)
+	}
+	d.mu.Unlock()
+	return tr.AccessToken
+}
+
+func (d *Daemon) doAntigravityPost(client *http.Client, endpoint string, body []byte, token *string, refreshToken, connID string) ([]byte, int, error) {
+	send := func(tok string) ([]byte, int, error) {
+		req, err := http.NewRequest("POST", endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, 0, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", antigravityUserAgent)
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer resp.Body.Close()
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, resp.StatusCode, err
+		}
+		return respBody, resp.StatusCode, nil
+	}
+
+	respBody, status, err := send(*token)
+	if err != nil {
+		return nil, status, err
+	}
+	if (status == http.StatusUnauthorized || status == http.StatusForbidden) && refreshToken != "" {
+		if newTok := d.refreshAntigravityAccessToken(client, connID, refreshToken); newTok != "" {
+			*token = newTok
+			return send(*token)
+		}
+	}
+	return respBody, status, nil
+}
+
+func extractAntigravityProjectID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var asStr string
+	if err := json.Unmarshal(raw, &asStr); err == nil && strings.TrimSpace(asStr) != "" {
+		return strings.TrimSpace(asStr)
+	}
+	var asObj struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &asObj); err == nil && strings.TrimSpace(asObj.ID) != "" {
+		return strings.TrimSpace(asObj.ID)
+	}
+	return ""
+}
+
+func pickLowerAgQuota(a, b *agQuota) *agQuota {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	if b.Pct < a.Pct {
+		return b
+	}
+	return a
+}
+
+func parseQuotaFractionPct(frac *float64, resetTime string) (float64, bool) {
+	if frac != nil {
+		pct := *frac * 100.0
+		if pct < 0 {
+			pct = 0
+		} else if pct > 100 {
+			pct = 100
+		}
+		return pct, true
+	}
+	if resetTime != "" {
+		return 0.0, true
+	}
+	return 0.0, false
+}
+
+func formatAntigravityCountdown(dur time.Duration, ru bool) string {
+	if dur <= 0 {
+		if ru {
+			return "0м"
+		}
+		return "0m"
+	}
+	days := int(dur / (24 * time.Hour))
+	hours := int((dur % (24 * time.Hour)) / time.Hour)
+	mins := int((dur % time.Hour) / time.Minute)
+	if days > 0 {
+		if ru {
+			if hours > 0 {
+				return fmt.Sprintf("%dд %dч", days, hours)
+			}
+			return fmt.Sprintf("%dд", days)
+		}
+		if hours > 0 {
+			return fmt.Sprintf("%dd %dh", days, hours)
+		}
+		return fmt.Sprintf("%dd", days)
+	}
+	if ru {
+		if hours > 0 {
+			return fmt.Sprintf("%d:%02d", hours, mins)
+		}
+		return fmt.Sprintf("%dм", mins)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%d:%02d", hours, mins)
+	}
+	return fmt.Sprintf("%dm", mins)
+}
+
+func formatAntigravityReset(lang string, tzMinutes int, nowUTC time.Time, q5h, qWeek *agQuota) string {
+	ru := lang == "ru"
+	tzOffset := time.Duration(tzMinutes) * time.Minute
+
+	clockStr := func(resetTime string) (string, time.Duration, bool) {
+		if resetTime == "" {
+			return "", 0, false
+		}
+		t, err := time.Parse(time.RFC3339, resetTime)
+		if err != nil {
+			return "", 0, false
+		}
+		localT := t.UTC().Add(tzOffset)
+		return fmt.Sprintf("%02d:%02d", localT.Hour(), localT.Minute()), t.UTC().Sub(nowUTC), true
+	}
+
+	if q5h != nil && qWeek != nil {
+		clk5h, _, ok5h := clockStr(q5h.ResetTime)
+		_, durW, okW := clockStr(qWeek.ResetTime)
+		if ok5h && okW {
+			cdW := formatAntigravityCountdown(durW, ru)
+			if ru {
+				return fmt.Sprintf("5ч %s · нед %s", clk5h, cdW)
+			}
+			return fmt.Sprintf("5h %s · wk %s", clk5h, cdW)
+		}
+		if ok5h {
+			if ru {
+				return fmt.Sprintf("5ч · сброс %s", clk5h)
+			}
+			return fmt.Sprintf("5h · resets %s", clk5h)
+		}
+		if okW {
+			cdW := formatAntigravityCountdown(durW, ru)
+			if ru {
+				return fmt.Sprintf("неделя · %s", cdW)
+			}
+			return fmt.Sprintf("week · %s", cdW)
+		}
+		if ru {
+			return "5ч / неделя"
+		}
+		return "5h / week"
+	}
+
+	if q5h != nil {
+		if clk, _, ok := clockStr(q5h.ResetTime); ok {
+			if ru {
+				return fmt.Sprintf("5ч · сброс %s", clk)
+			}
+			return fmt.Sprintf("5h · resets %s", clk)
+		}
+		if ru {
+			return "5ч"
+		}
+		return "5h"
+	}
+
+	if qWeek != nil {
+		if clk, durW, ok := clockStr(qWeek.ResetTime); ok {
+			if durW >= 24*time.Hour {
+				cdW := formatAntigravityCountdown(durW, ru)
+				if ru {
+					return fmt.Sprintf("неделя · %s", cdW)
+				}
+				return fmt.Sprintf("week · in %s", cdW)
+			}
+			if ru {
+				return fmt.Sprintf("неделя · сброс %s", clk)
+			}
+			return fmt.Sprintf("week · resets %s", clk)
+		}
+		if ru {
+			return "неделя"
+		}
+		return "week"
+	}
+	return ""
+}
+
+func classifyAntigravitySummaryBuckets(summaryBody []byte, buckets *agBuckets) int {
+	var summary struct {
+		Groups []struct {
+			Buckets []struct {
+				BucketID          string   `json:"bucketId"`
+				RemainingFraction *float64 `json:"remainingFraction"`
+				ResetTime         string   `json:"resetTime"`
+			} `json:"buckets"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal(summaryBody, &summary); err != nil {
+		return 0
+	}
+	matched := 0
+	for _, g := range summary.Groups {
+		for _, b := range g.Buckets {
+			pct, ok := parseQuotaFractionPct(b.RemainingFraction, b.ResetTime)
+			if !ok {
+				continue
+			}
+			id := strings.ToLower(strings.TrimSpace(b.BucketID))
+			q := &agQuota{Pct: pct, ResetTime: b.ResetTime}
+			switch {
+			case id == "gemini-5h" || id == "gemini:5h" || (strings.Contains(id, "gemini") && !strings.Contains(id, "argon") && strings.Contains(id, "5h")):
+				buckets.Gemini5h = pickLowerAgQuota(buckets.Gemini5h, q)
+				matched++
+			case id == "gemini-weekly" || id == "gemini:weekly" || (strings.Contains(id, "gemini") && !strings.Contains(id, "argon") && strings.Contains(id, "week")):
+				buckets.GeminiWeek = pickLowerAgQuota(buckets.GeminiWeek, q)
+				matched++
+			case id == "3p-5h" || id == "claude:5h" || ((strings.Contains(id, "3p") || strings.Contains(id, "claude") || strings.Contains(id, "gpt")) && strings.Contains(id, "5h")):
+				buckets.Claude5h = pickLowerAgQuota(buckets.Claude5h, q)
+				matched++
+			case id == "3p-weekly" || id == "claude:weekly" || ((strings.Contains(id, "3p") || strings.Contains(id, "claude") || strings.Contains(id, "gpt")) && strings.Contains(id, "week")):
+				buckets.ClaudeWeek = pickLowerAgQuota(buckets.ClaudeWeek, q)
+				matched++
+			}
+		}
+	}
+	return matched
+}
+
+func fillAntigravityFromModels(modelsBody []byte, nowUTC time.Time, isFree bool, buckets *agBuckets) {
+	var data struct {
+		Models map[string]struct {
+			QuotaInfo struct {
+				RemainingFraction *float64 `json:"remainingFraction"`
+				ResetTime         string   `json:"resetTime"`
+			} `json:"quotaInfo"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(modelsBody, &data); err != nil {
+		return
+	}
+
+	names := make([]string, 0, len(data.Models))
+	for name := range data.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var fbGemini5h, fbGeminiWeek, fbClaude5h, fbClaudeWeek *agQuota
+	for _, name := range names {
+		m := data.Models[name]
+		pct, ok := parseQuotaFractionPct(m.QuotaInfo.RemainingFraction, m.QuotaInfo.ResetTime)
+		if !ok {
+			continue
+		}
+		lname := strings.ToLower(name)
+		isGemini := strings.Contains(lname, "gemini") && !strings.Contains(lname, "argon")
+		isClaude := strings.Contains(lname, "claude") || strings.Contains(lname, "gpt")
+		if !isGemini && !isClaude {
+			continue
+		}
+
+		isWeekly := isFree || strings.Contains(lname, "weekly")
+		if !isWeekly && m.QuotaInfo.ResetTime != "" {
+			if t, err := time.Parse(time.RFC3339, m.QuotaInfo.ResetTime); err == nil {
+				if t.UTC().Sub(nowUTC) > 6*time.Hour {
+					isWeekly = true
+				}
+			}
+		}
+
+		q := &agQuota{Pct: pct, ResetTime: m.QuotaInfo.ResetTime}
+		if isGemini {
+			if isWeekly {
+				fbGeminiWeek = pickLowerAgQuota(fbGeminiWeek, q)
+			} else {
+				fbGemini5h = pickLowerAgQuota(fbGemini5h, q)
+			}
+		} else {
+			if isWeekly {
+				fbClaudeWeek = pickLowerAgQuota(fbClaudeWeek, q)
+			} else {
+				fbClaude5h = pickLowerAgQuota(fbClaude5h, q)
+			}
+		}
+	}
+
+	if buckets.Gemini5h == nil && !isFree {
+		buckets.Gemini5h = fbGemini5h
+	}
+	if buckets.GeminiWeek == nil {
+		buckets.GeminiWeek = fbGeminiWeek
+	}
+	if buckets.Claude5h == nil && !isFree {
+		buckets.Claude5h = fbClaude5h
+	}
+	if buckets.ClaudeWeek == nil {
+		buckets.ClaudeWeek = fbClaudeWeek
+	}
+}
+
 func (d *Daemon) pollAntigravityLimits(c Connector) {
 	token := strings.TrimSpace(c.Token)
 	refreshToken := strings.TrimSpace(c.RefreshToken)
@@ -1191,7 +1554,6 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 		}
 	}
 
-	// If token looks like a refresh token (starts with 1//), move it
 	if strings.HasPrefix(token, "1//") && refreshToken == "" {
 		refreshToken = token
 		token = ""
@@ -1203,39 +1565,8 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 
 	client := getHTTPClient(10 * time.Second)
 
-	// If we have a refresh token and no access token, refresh right away
 	if refreshToken != "" && token == "" {
-		cID, cSec := getAntigravityOAuthCreds()
-		form := url.Values{
-			"client_id":     {cID},
-			"client_secret": {cSec},
-			"refresh_token": {refreshToken},
-			"grant_type":    {"refresh_token"},
-		}
-		resp, err := client.PostForm("https://oauth2.googleapis.com/token", form)
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				var tr struct {
-					AccessToken string `json:"access_token"`
-				}
-				if err := json.NewDecoder(resp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
-					token = tr.AccessToken
-					d.mu.Lock()
-					for idx := range d.settings.Connectors {
-						if d.settings.Connectors[idx].ID == c.ID {
-							d.settings.Connectors[idx].Token = tr.AccessToken
-							d.settings.Connectors[idx].RefreshToken = refreshToken
-							break
-						}
-					}
-					if data, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
-						os.WriteFile(d.cfgPath, data, 0644)
-					}
-					d.mu.Unlock()
-				}
-			}
-		}
+		token = d.refreshAntigravityAccessToken(client, c.ID, refreshToken)
 	}
 
 	if token == "" {
@@ -1245,154 +1576,176 @@ func (d *Daemon) pollAntigravityLimits(c Connector) {
 		return
 	}
 
-	req, err := http.NewRequest("POST", "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", bytes.NewBuffer([]byte("{}")))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "antigravity")
-
-	resp, err := client.Do(req)
-	if err != nil {
+	// Step 1: resolve Cloud Code projectId and subscription tier via loadCodeAssist
+	loadBody := []byte(`{"metadata":{"ideName":"antigravity","ideType":"ANTIGRAVITY","ideVersion":"2.25.0","updateChannel":"stable","pluginType":"GEMINI"},"mode":"FULL_ELIGIBILITY_CHECK"}`)
+	loadResp, loadStatus, loadErr := d.doAntigravityPost(
+		client,
+		"https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
+		loadBody,
+		&token,
+		refreshToken,
+		c.ID,
+	)
+	if loadErr != nil {
 		d.mu.Lock()
-		d.failed[c.ID] = "Antigravity error: " + err.Error()
+		d.failed[c.ID] = "Antigravity error: " + loadErr.Error()
 		d.mu.Unlock()
 		return
 	}
-	defer resp.Body.Close()
+	if loadStatus == http.StatusUnauthorized || loadStatus == http.StatusForbidden {
+		d.mu.Lock()
+		d.failed[c.ID] = "Antigravity token expired"
+		d.mu.Unlock()
+		return
+	}
 
-	if resp.StatusCode == 401 || resp.StatusCode == 403 {
-		if refreshToken != "" {
-			cID, cSec := getAntigravityOAuthCreds()
-			form := url.Values{
-				"client_id":     {cID},
-				"client_secret": {cSec},
-				"refresh_token": {refreshToken},
-				"grant_type":    {"refresh_token"},
-			}
-			rResp, rErr := client.PostForm("https://oauth2.googleapis.com/token", form)
-			if rErr == nil {
-				defer rResp.Body.Close()
-				if rResp.StatusCode == http.StatusOK {
-					var tr struct {
-						AccessToken string `json:"access_token"`
-					}
-					if err := json.NewDecoder(rResp.Body).Decode(&tr); err == nil && tr.AccessToken != "" {
-						token = tr.AccessToken
-						d.mu.Lock()
-						for idx := range d.settings.Connectors {
-							if d.settings.Connectors[idx].ID == c.ID {
-								d.settings.Connectors[idx].Token = tr.AccessToken
-								d.settings.Connectors[idx].RefreshToken = refreshToken
-								break
-							}
-						}
-						if data, err := json.MarshalIndent(d.settings, "", "  "); err == nil {
-							os.WriteFile(d.cfgPath, data, 0644)
-						}
-						d.mu.Unlock()
-
-						req2, _ := http.NewRequest("POST", "https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels", bytes.NewBuffer([]byte("{}")))
-						req2.Header.Set("Authorization", "Bearer "+token)
-						req2.Header.Set("Content-Type", "application/json")
-						req2.Header.Set("User-Agent", "antigravity")
-						if resp2, err2 := client.Do(req2); err2 == nil {
-							defer resp2.Body.Close()
-							resp = resp2
-						}
-					}
-				}
-			}
+	projectID := ""
+	isFree := false
+	if loadStatus == http.StatusOK {
+		var lc struct {
+			Project     json.RawMessage `json:"cloudaicompanionProject"`
+			CurrentTier *struct {
+				ID string `json:"id"`
+			} `json:"currentTier"`
+			PaidTier *struct {
+				ID string `json:"id"`
+			} `json:"paidTier"`
 		}
-		if resp.StatusCode == 401 || resp.StatusCode == 403 {
+		if err := json.Unmarshal(loadResp, &lc); err == nil {
+			projectID = extractAntigravityProjectID(lc.Project)
+			tierID := ""
+			if lc.PaidTier != nil && lc.PaidTier.ID != "" {
+				tierID = lc.PaidTier.ID
+			} else if lc.CurrentTier != nil {
+				tierID = lc.CurrentTier.ID
+			}
+			isFree = strings.Contains(strings.ToLower(tierID), "free")
+		}
+	}
+
+	quotaPayload := []byte("{}")
+	if projectID != "" {
+		if b, err := json.Marshal(map[string]string{"project": projectID}); err == nil {
+			quotaPayload = b
+		}
+	}
+
+	var buckets agBuckets
+
+	// Step 2: primary endpoint retrieveUserQuotaSummary returns separate 5h and weekly buckets
+	summaryResp, summaryStatus, summaryErr := d.doAntigravityPost(
+		client,
+		"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+		quotaPayload,
+		&token,
+		refreshToken,
+		c.ID,
+	)
+	if summaryErr == nil && (summaryStatus == http.StatusUnauthorized || summaryStatus == http.StatusForbidden) {
+		d.mu.Lock()
+		d.failed[c.ID] = "Antigravity token expired"
+		d.mu.Unlock()
+		return
+	}
+	summaryCount := 0
+	if summaryErr == nil && summaryStatus == http.StatusOK {
+		summaryCount = classifyAntigravitySummaryBuckets(summaryResp, &buckets)
+	}
+
+	// Step 3: supplement / fallback via fetchAvailableModels if any bucket is missing
+	nowUTC := time.Now().UTC()
+	needModels := summaryCount == 0 ||
+		buckets.GeminiWeek == nil || buckets.ClaudeWeek == nil ||
+		(!isFree && (buckets.Gemini5h == nil || buckets.Claude5h == nil))
+	modelsStatus := 0
+	var modelsErr error
+	if needModels {
+		var modelsResp []byte
+		modelsResp, modelsStatus, modelsErr = d.doAntigravityPost(
+			client,
+			"https://daily-cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels",
+			quotaPayload,
+			&token,
+			refreshToken,
+			c.ID,
+		)
+		if modelsErr == nil && (modelsStatus == http.StatusUnauthorized || modelsStatus == http.StatusForbidden) {
 			d.mu.Lock()
 			d.failed[c.ID] = "Antigravity token expired"
 			d.mu.Unlock()
 			return
 		}
+		if modelsErr == nil && modelsStatus == http.StatusOK {
+			fillAntigravityFromModels(modelsResp, nowUTC, isFree, &buckets)
+		}
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	if summaryStatus != http.StatusOK && modelsStatus != http.StatusOK {
 		d.mu.Lock()
-		d.failed[c.ID] = fmt.Sprintf("Antigravity HTTP %d", resp.StatusCode)
+		if modelsErr != nil {
+			d.failed[c.ID] = "Antigravity error: " + modelsErr.Error()
+		} else if modelsStatus != 0 {
+			d.failed[c.ID] = fmt.Sprintf("Antigravity HTTP %d", modelsStatus)
+		} else if summaryErr != nil {
+			d.failed[c.ID] = "Antigravity error: " + summaryErr.Error()
+		} else {
+			d.failed[c.ID] = fmt.Sprintf("Antigravity HTTP %d", summaryStatus)
+		}
 		d.mu.Unlock()
 		return
 	}
 
-	var data struct {
-		Models map[string]struct {
-			QuotaInfo struct {
-				RemainingFraction float64 `json:"remainingFraction"`
-				ResetTime         string  `json:"resetTime"`
-			} `json:"quotaInfo"`
-		} `json:"models"`
+	mode := strings.ToLower(strings.TrimSpace(c.QuotaMode))
+	var q5h, qWeek *agQuota
+	switch mode {
+	case "gemini":
+		q5h = buckets.Gemini5h
+		qWeek = buckets.GeminiWeek
+	case "claude":
+		q5h = buckets.Claude5h
+		qWeek = buckets.ClaudeWeek
+	default: // "min"
+		q5h = pickLowerAgQuota(buckets.Gemini5h, buckets.Claude5h)
+		qWeek = pickLowerAgQuota(buckets.GeminiWeek, buckets.ClaudeWeek)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if q5h == nil && qWeek == nil {
 		return
 	}
 
-	type Quota struct {
-		RemainingFraction float64
-		ResetTime         string
-	}
-	var target *Quota
-	for name, m := range data.Models {
-		if strings.Contains(name, "flash") && m.QuotaInfo.ResetTime != "" {
-			target = &Quota{
-				RemainingFraction: m.QuotaInfo.RemainingFraction,
-				ResetTime:         m.QuotaInfo.ResetTime,
-			}
-			break
-		}
-	}
-	if target == nil {
-		for _, m := range data.Models {
-			if m.QuotaInfo.ResetTime != "" {
-				target = &Quota{
-					RemainingFraction: m.QuotaInfo.RemainingFraction,
-					ResetTime:         m.QuotaInfo.ResetTime,
-				}
-				break
-			}
-		}
-	}
-
-	if target == nil {
-		return
-	}
-
-	pct := target.RemainingFraction * 100.0
-	resetStr := "5ч"
-	if d.settings.Lang != "ru" {
-		resetStr = "5h"
-	}
-	if target.ResetTime != "" {
-		if t, err := time.Parse(time.RFC3339, target.ResetTime); err == nil {
-			tzOffset := time.Duration(d.settings.TimezoneMinutes) * time.Minute
-			localT := t.UTC().Add(tzOffset)
-			if d.settings.Lang == "ru" {
-				resetStr = fmt.Sprintf("5ч - сброс %02d:%02d", localT.Hour(), localT.Minute())
-			} else {
-				resetStr = fmt.Sprintf("5h - resets %02d:%02d", localT.Hour(), localT.Minute())
-			}
-		}
-	}
+	resetStr := formatAntigravityReset(d.settings.Lang, d.settings.TimezoneMinutes, nowUTC, q5h, qWeek)
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	delete(d.failed, c.ID)
 	now := d.now()
 
-	d.slots["limit.antigravity.5h"] = Slot{
-		Number:    pct,
-		Text:      fmt.Sprintf("%.0f%%", pct),
-		At:        now,
-		TTL:       300,
-		OK:        true,
-		Connector: c.ID,
+	if q5h != nil {
+		d.slots["limit.antigravity.5h"] = Slot{
+			Number:    q5h.Pct,
+			Text:      fmt.Sprintf("%.0f%%", q5h.Pct),
+			At:        now,
+			TTL:       300,
+			OK:        true,
+			Connector: c.ID,
+		}
+	} else {
+		delete(d.slots, "limit.antigravity.5h")
 	}
+
+	if qWeek != nil {
+		d.slots["limit.antigravity.week"] = Slot{
+			Number:    qWeek.Pct,
+			Text:      fmt.Sprintf("%.0f%%", qWeek.Pct),
+			At:        now,
+			TTL:       300,
+			OK:        true,
+			Connector: c.ID,
+		}
+	} else {
+		delete(d.slots, "limit.antigravity.week")
+	}
+
 	d.slots["limit.antigravity.reset"] = Slot{
 		Text:      resetStr,
 		At:        now,
